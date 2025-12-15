@@ -68,12 +68,6 @@ export function generateExcelFile(
       "Options Found": k.options.join(", "),
       "Popularity Rank": i + 1,
     })),
-    ...isqs.buyers.map((b, i) => ({
-      "ISQ Type": "Buyer",
-      "ISQ Name": b.name,
-      "Options Found": b.options.join(", "),
-      "Frequency Rank": i + 1,
-    })),
   ];
 
   const sheet2 = XLSX.utils.json_to_sheet(websiteEvidence);
