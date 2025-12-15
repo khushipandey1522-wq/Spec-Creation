@@ -6,7 +6,7 @@ import Stage3Results from "./components/Stage3Results";
 import { generateStage1WithGemini, extractISQWithGemini } from "./utils/api";
 import { generateExcelFile } from "./utils/excel";
 import type { InputData, Stage1Output, ISQ } from "./types";
-import { Download } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 
 type Stage = "stage0" | "stages";
 
@@ -18,40 +18,72 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"stage1" | "stage2" | "stage3">("stage1");
+  const [processingStage, setProcessingStage] = useState<string>("");
 
   const handleStage0Submit = async (data: InputData) => {
     setInputData(data);
     setLoading(true);
     setError("");
+    setStage1Data(null);
+    setIsqs(null);
+    setActiveTab("stage1");
 
     try {
-      const result = await generateStage1WithGemini(data);
-      setStage1Data(result);
+      setProcessingStage("Generating Stage 1 specifications...");
+      const result1 = await generateStage1WithGemini(data);
+      setStage1Data(result1);
+
+      setProcessingStage("Extracting Stage 2 ISQs from URLs...");
+      const result2 = await extractISQWithGemini(data, data.urls);
+      setIsqs(result2);
+
+      setProcessingStage("All stages complete!");
       setStage("stages");
     } catch (err) {
       setError(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
       console.error(err);
     } finally {
       setLoading(false);
+      setProcessingStage("");
     }
   };
 
-  const handleStage1Next = async () => {
-    if (!inputData || !stage1Data) return;
-
-    setLoading(true);
+  const handleReset = () => {
+    setStage("stage0");
+    setInputData(null);
+    setStage1Data(null);
+    setIsqs(null);
     setError("");
+    setActiveTab("stage1");
+  };
 
-    try {
-      const result = await extractISQWithGemini(inputData, inputData.urls);
-      setIsqs(result);
-      setActiveTab("stage2");
-    } catch (err) {
-      setError(`Error extracting ISQs: ${err instanceof Error ? err.message : "Unknown error"}`);
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+  const downloadJSON = (data: any, filename: string) => {
+    const dataStr = JSON.stringify(data, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadStage1JSON = () => {
+    if (!stage1Data) return;
+    downloadJSON(stage1Data, "stage1_output.json");
+  };
+
+  const handleDownloadStage2JSON = () => {
+    if (!isqs) return;
+    downloadJSON(isqs, "stage2_output.json");
+  };
+
+  const handleDownloadStage3JSON = () => {
+    if (!stage1Data || !isqs) return;
+    const stage3Data = extractCommonSpecs(stage1Data, isqs);
+    downloadJSON(stage3Data, "stage3_output.json");
   };
 
   const handleDownloadExcel = () => {
@@ -60,33 +92,18 @@ function App() {
     }
   };
 
-  const handleDownloadJSON = () => {
-    if (!stage1Data || !isqs) return;
-
-    const combinedData = {
-      stage1: stage1Data,
-      stage2: isqs,
-      stage3: extractCommonSpecs(stage1Data, isqs),
-    };
-
-    const dataStr = JSON.stringify(combinedData, null, 2);
-    const dataBlob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "combined_output.json";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {error && (
         <div className="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg shadow-lg max-w-md z-50">
           <p className="font-semibold">Error</p>
           <p className="text-sm">{error}</p>
+        </div>
+      )}
+
+      {processingStage && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-blue-100 border border-blue-400 text-blue-700 px-6 py-3 rounded-lg shadow-lg z-50">
+          <p className="font-semibold">{processingStage}</p>
         </div>
       )}
 
@@ -101,15 +118,13 @@ function App() {
                   <h1 className="text-3xl font-bold text-gray-900">Specification Results</h1>
                   <p className="text-gray-600 mt-1">View all three stages in the tabs below</p>
                 </div>
-                {isqs && (
-                  <button
-                    onClick={handleDownloadJSON}
-                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-700 text-white font-semibold rounded-lg hover:from-orange-700 hover:to-orange-800 transition"
-                  >
-                    <Download size={20} />
-                    Download JSON
-                  </button>
-                )}
+                <button
+                  onClick={handleReset}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white font-semibold rounded-lg hover:from-gray-700 hover:to-gray-800 transition"
+                >
+                  <RefreshCw size={20} />
+                  Reset
+                </button>
               </div>
 
               <div className="border-b border-gray-200 mb-8">
@@ -122,7 +137,7 @@ function App() {
                         : "text-gray-600 hover:text-gray-900"
                     }`}
                   >
-                    Stage 1 Output
+                    Stage 1
                   </button>
                   <button
                     onClick={() => setActiveTab("stage2")}
@@ -135,7 +150,7 @@ function App() {
                           : "text-gray-400 cursor-not-allowed"
                     }`}
                   >
-                    Stage 2 Output
+                    Stage 2
                   </button>
                   <button
                     onClick={() => setActiveTab("stage3")}
@@ -148,25 +163,54 @@ function App() {
                           : "text-gray-400 cursor-not-allowed"
                     }`}
                   >
-                    Stage 3 Final Specs
+                    Stage 3
                   </button>
                 </div>
               </div>
 
               {activeTab === "stage1" && (
-                <Stage1Results data={stage1Data} onNext={handleStage1Next} loading={loading} />
+                <>
+                  <Stage1Results data={stage1Data} />
+                  <div className="mt-8 pt-8 border-t border-gray-200">
+                    <button
+                      onClick={handleDownloadStage1JSON}
+                      className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-800 transition"
+                    >
+                      <Download size={20} />
+                      Download Stage 1 JSON
+                    </button>
+                  </div>
+                </>
               )}
 
               {activeTab === "stage2" && isqs && (
-                <Stage2Results
-                  isqs={isqs}
-                  onDownloadExcel={handleDownloadExcel}
-                  loading={loading}
-                />
+                <>
+                  <Stage2Results isqs={isqs} onDownloadExcel={handleDownloadExcel} />
+                  <div className="mt-8 pt-8 border-t border-gray-200">
+                    <button
+                      onClick={handleDownloadStage2JSON}
+                      className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white font-semibold rounded-lg hover:from-green-700 hover:to-green-800 transition"
+                    >
+                      <Download size={20} />
+                      Download Stage 2 JSON
+                    </button>
+                  </div>
+                </>
               )}
 
               {activeTab === "stage3" && isqs && stage1Data && (
-                <Stage3Results stage1Data={stage1Data} isqs={isqs} />
+                <>
+                  <Stage3Results stage1Data={stage1Data} isqs={isqs} />
+                  <div className="mt-8 pt-8 border-t border-gray-200">
+                    <button
+                      onClick={handleDownloadStage3JSON}
+                      className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-amber-600 to-amber-700 text-white font-semibold rounded-lg hover:from-amber-700 hover:to-amber-800 transition"
+                    >
+                      <Download size={20} />
+                      Download Stage 3 JSON
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>

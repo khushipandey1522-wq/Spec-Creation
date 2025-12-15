@@ -3,11 +3,9 @@ import type { Stage1Output } from "../types";
 
 interface Stage1ResultsProps {
   data: Stage1Output;
-  onNext: () => void;
-  loading?: boolean;
 }
 
-export default function Stage1Results({ data, onNext, loading = false }: Stage1ResultsProps) {
+export default function Stage1Results({ data }: Stage1ResultsProps) {
   return (
     <div>
       <h2 className="text-2xl font-bold text-gray-900 mb-2">Stage 1: Specifications Generated</h2>
@@ -100,16 +98,6 @@ export default function Stage1Results({ data, onNext, loading = false }: Stage1R
             ))}
           </div>
         ))}
-
-      <div className="mt-8 pt-8 border-t border-gray-200">
-        <button
-          onClick={onNext}
-          disabled={loading}
-          className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition"
-        >
-          {loading ? "Processing ISQ Extraction..." : "Extract ISQs from URLs"}
-        </button>
-      </div>
       </div>
     </div>
   );
