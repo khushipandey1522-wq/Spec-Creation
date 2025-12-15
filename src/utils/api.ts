@@ -19,14 +19,17 @@ async function fetchWithRetry(
   retries = 3,
   baseDelay = 3000
 ): Promise<Response> {
+  let lastStatus: number | undefined;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const response = await fetch(url, options);
 
     if (response.ok) return response;
 
+    lastStatus = response.status;
+
     if (response.status === 429 || response.status === 503 || response.status === 502) {
       if (attempt === retries) {
-        throw new Error(`Gemini overloaded after ${retries + 1} attempts`);
+        throw new Error(`Gemini overloaded after ${retries + 1} attempts. Last status code: ${lastStatus}`);
       }
       const waitTime = baseDelay * Math.pow(2, attempt);
       console.warn(`Gemini overloaded (${response.status}). Retrying in ${waitTime}ms`);
@@ -35,7 +38,7 @@ async function fetchWithRetry(
     }
 
     const err = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${err}`);
+    throw new Error(`Gemini API error ${lastStatus}: ${err}`);
   }
 
   throw new Error("Unreachable");
