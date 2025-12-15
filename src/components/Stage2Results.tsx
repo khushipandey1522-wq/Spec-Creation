@@ -62,31 +62,6 @@ export default function Stage2Results({
           </div>
         </div>
 
-        {/* Buyer ISQs */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Buyer ISQs (2)</h2>
-          <div className="grid gap-4">
-            {isqs.buyers.map((isq, idx) => (
-              <div key={idx} className="bg-green-50 border-l-4 border-green-500 p-6 rounded-lg">
-                <p className="font-semibold text-lg text-gray-900 mb-3">
-                  {idx + 1}. {isq.name}
-                  {isq.name === isqs.config.name && (
-                    <span className="ml-2 text-xs bg-green-200 text-green-800 px-2 py-1 rounded">
-                      Also Config ISQ
-                    </span>
-                  )}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {isq.options.map((option, oIdx) => (
-                    <span key={oIdx} className="bg-green-200 text-green-800 px-3 py-1 rounded-full text-sm">
-                      {option}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
 
       <div className="mt-8 pt-8 border-t border-gray-200">
         <button
