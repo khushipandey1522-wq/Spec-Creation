@@ -6,7 +6,6 @@ interface Stage2ResultsProps {
   isqs: {
     config: ISQ;
     keys: ISQ[];
-    buyers: ISQ[];
   };
   onDownloadExcel: () => void;
   loading?: boolean;
