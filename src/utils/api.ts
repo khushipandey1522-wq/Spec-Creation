@@ -17,7 +17,7 @@ async function fetchWithRetry(
   url: string,
   options: RequestInit,
   retries = 3,
-  baseDelay = 3000
+  baseDelay = 8000
 ): Promise<Response> {
   let lastStatus: number | undefined;
   for (let attempt = 0; attempt <= retries; attempt++) {
