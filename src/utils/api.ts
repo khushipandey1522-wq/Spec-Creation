@@ -521,7 +521,6 @@ export async function generateExcel(
     final_isqs: [
       { type: "Config", ...isqs.config },
       ...isqs.keys.map((k) => ({ type: "Key", ...k })),
-      ...isqs.buyers.map((b) => ({ type: "Buyer", ...b })),
     ],
   };
 }
