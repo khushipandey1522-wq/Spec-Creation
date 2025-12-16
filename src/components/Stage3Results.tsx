@@ -142,11 +142,6 @@ function extractCommonSpecsDetailed(
     types.push("Key");
     isqMap.set(k.name, types);
   });
-  isqs.buyers.forEach((b) => {
-    const types = isqMap.get(b.name) || [];
-    types.push("Buyer");
-    isqMap.set(b.name, types);
-  });
 
   const commonSpecs: CommonSpec[] = [];
   const specNames = new Set<string>();
