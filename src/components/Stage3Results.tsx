@@ -1,10 +1,6 @@
 import React from "react";
 import type { Stage1Output, ISQ, Spec } from "../types";
 
-if (!data || (!data.config && !data.keys?.length)) {
-  return <div className="text-gray-500">No ISQ data found</div>;
-}
-
 interface Stage3ResultsProps {
   stage1Data: Stage1Output;
   isqs: {
@@ -25,6 +21,11 @@ interface CommonSpec {
 }
 
 export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) {
+
+   if (!isqs || (!isqs.config && !isqs.keys?.length)) {
+    return <div className="text-gray-500">No ISQ data found</div>;
+  }
+
   const commonSpecs = extractCommonSpecsDetailed(stage1Data, isqs);
 
   const primarySpecs = commonSpecs.filter((s) => s.tier === "primary");
