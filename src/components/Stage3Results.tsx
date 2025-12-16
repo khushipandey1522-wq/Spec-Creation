@@ -1,6 +1,10 @@
 import React from "react";
 import type { Stage1Output, ISQ, Spec } from "../types";
 
+if (!data || (!data.config && !data.keys?.length)) {
+  return <div className="text-gray-500">No ISQ data found</div>;
+}
+
 interface Stage3ResultsProps {
   stage1Data: Stage1Output;
   isqs: {
