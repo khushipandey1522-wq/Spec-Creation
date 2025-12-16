@@ -6,7 +6,6 @@ interface Stage3ResultsProps {
   isqs: {
     config: ISQ;
     keys: ISQ[];
-    buyers: ISQ[];
   };
 }
 
