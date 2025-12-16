@@ -16,7 +16,7 @@ const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  retries = 3,
+  retries = 2,
   baseDelay = 5000
 ): Promise<Response> {
   let lastStatus: number | undefined;
