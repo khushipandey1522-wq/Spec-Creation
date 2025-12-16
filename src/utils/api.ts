@@ -139,7 +139,9 @@ export async function extractISQWithGemini(
   if (!GEMINI_API_KEY) {
     throw new Error("Gemini API key is not configured. Please add VITE_GEMINI_API_KEY to your .env file.");
   }
-
+console.log("Waiting before ISQ extraction to avoid Gemini overload...");
+  await sleep(7000); // 7 seconds safe gap
+  
   const urlContents = await Promise.all(urls.map(fetchURL));
   const prompt = buildISQExtractionPrompt(input, urls, urlContents);
 
