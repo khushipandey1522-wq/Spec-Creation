@@ -82,8 +82,14 @@ function App() {
 
   const handleDownloadStage3JSON = () => {
     if (!stage1Data || !isqs) return;
-    const stage3Data = extractCommonSpecs(stage1Data, isqs);
-    downloadJSON(stage3Data, "stage3_output.json");
+    const { common_specs, buyer_isqs } = extractCommonSpecs(stage1Data, isqs);
+    downloadJSON(
+      {
+        common_specifications: common_specs,
+        buyer_isqs: buyer_isqs,
+      },
+      "stage3_output.json"
+    );
   };
 
   const handleDownloadExcel = () => {
@@ -224,40 +230,81 @@ function extractCommonSpecs(
   stage1: Stage1Output,
   isqs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }
 ) {
-  const allISQNames = new Set([
+  const stage2ISQNames = new Set([
     isqs.config.name,
     ...isqs.keys.map((k) => k.name),
     ...isqs.buyers.map((b) => b.name),
   ]);
 
   const commonSpecs: any[] = [];
+  const primarySpecs: any[] = [];
+  const secondarySpecs: any[] = [];
 
   stage1.seller_specs.forEach((ss) => {
     ss.mcats.forEach((mcat) => {
-      const { finalized_primary_specs, finalized_secondary_specs, finalized_tertiary_specs } =
+      const { finalized_primary_specs, finalized_secondary_specs } =
         mcat.finalized_specs;
 
-      const allSpecs = [
-        ...finalized_primary_specs.specs,
-        ...finalized_secondary_specs.specs,
-        ...finalized_tertiary_specs.specs,
-      ];
-
-      allSpecs.forEach((spec) => {
-        if (allISQNames.has(spec.spec_name)) {
-          commonSpecs.push({
+      finalized_primary_specs.specs.forEach((spec) => {
+        if (stage2ISQNames.has(spec.spec_name)) {
+          primarySpecs.push({
             spec_name: spec.spec_name,
             options: spec.options,
             input_type: spec.input_type,
-            affix_flag: spec.affix_flag,
-            affix_presence_flag: spec.affix_presence_flag,
+            category: "Primary",
+          });
+        }
+      });
+
+      finalized_secondary_specs.specs.forEach((spec) => {
+        if (stage2ISQNames.has(spec.spec_name)) {
+          secondarySpecs.push({
+            spec_name: spec.spec_name,
+            options: spec.options,
+            input_type: spec.input_type,
+            category: "Secondary",
           });
         }
       });
     });
   });
 
-  return commonSpecs;
+  const buyerISQs = filterBuyerISQs(primarySpecs, secondarySpecs, isqs.buyers);
+
+  return {
+    common_specs: [...primarySpecs, ...secondarySpecs],
+    buyer_isqs: buyerISQs,
+  };
+}
+
+function filterBuyerISQs(
+  primarySpecs: any[],
+  secondarySpecs: any[],
+  buyerISQList: ISQ[]
+): any[] {
+  const primarySpecNames = new Set(primarySpecs.map((s) => s.spec_name));
+  const secondarySpecNames = new Set(secondarySpecs.map((s) => s.spec_name));
+
+  const validBuyerISQs = buyerISQList.filter((buyer) => {
+    const isPrimary = primarySpecNames.has(buyer.name);
+    const isSecondary = secondarySpecNames.has(buyer.name);
+    return isPrimary || isSecondary;
+  });
+
+  const filteredISQs: any[] = [];
+
+  for (const buyer of validBuyerISQs) {
+    if (filteredISQs.length >= 2) break;
+
+    const isPrimary = primarySpecNames.has(buyer.name);
+    filteredISQs.push({
+      spec_name: buyer.name,
+      options: buyer.options,
+      category: isPrimary ? "Primary" : "Secondary",
+    });
+  }
+
+  return filteredISQs;
 }
 
 export default App;

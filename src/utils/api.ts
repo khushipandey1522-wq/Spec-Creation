@@ -46,108 +46,118 @@ async function fetchWithRetry(
 
 
 function extractJSONFromGemini(response) {
-  if (!response?.candidates?.length) {
-    throw new Error("No candidates found in Gemini response");
-  }
-
-  const parts =
-    response.candidates[0]?.content?.parts ||
-    response.candidates[0]?.content ||
-    [];
-
-  let rawText = "";
-
-  for (const part of parts) {
-    if (typeof part.text === "string") {
-      rawText += part.text + "\n";
-    }
-
-    if (part.json) {
-      return part.json; 
-    }
-  }
-
-  // Clean markdown wrappers
-  let cleaned = rawText
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
-    .trim();
-
-  // Extract JSON block
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  if (match) cleaned = match[0];
-
-  // Fix trailing commas
-  cleaned = cleaned.replace(/,(\s*[\]}])/g, "$1");
-
   try {
-    return JSON.parse(cleaned);
-  } catch (err) {
-    console.warn("Gemini JSON parse failed: returning safe fallback.");
+    if (!response?.candidates?.length) {
+      console.warn("No candidates in response, returning null for fallback");
+      return null;
+    }
 
-    return {
-      seller_specs: [],
-    };
+    const parts =
+      response.candidates[0]?.content?.parts ||
+      response.candidates[0]?.content ||
+      [];
+
+    let rawText = "";
+
+    for (const part of parts) {
+      if (typeof part.text === "string") {
+        rawText += part.text + "\n";
+      }
+
+      if (part.json) {
+        return part.json;
+      }
+    }
+
+    if (!rawText.trim()) {
+      console.warn("No text content in response, returning null for fallback");
+      return null;
+    }
+
+    let cleaned = rawText
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) cleaned = match[0];
+
+    cleaned = cleaned.replace(/,(\s*[\]}])/g, "$1");
+
+    try {
+      return JSON.parse(cleaned);
+    } catch (parseErr) {
+      console.warn("JSON parse failed, returning null for fallback:", parseErr);
+      return null;
+    }
+  } catch (error) {
+    console.warn("Unexpected error in extractJSONFromGemini:", error);
+    return null;
   }
 }
 
 
-const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
+const STAGE1_API_KEY = (import.meta.env.VITE_STAGE1_API_KEY || "").trim();
+const STAGE2_API_KEY = (import.meta.env.VITE_STAGE2_API_KEY || "").trim();
 
 export async function generateStage1WithGemini(
   input: InputData
 ): Promise<Stage1Output> {
-  if (!GEMINI_API_KEY) {
-    throw new Error("Gemini API key is not configured. Please add VITE_GEMINI_API_KEY to your .env file.");
+  if (!STAGE1_API_KEY) {
+    throw new Error("Stage 1 API key is not configured. Please add VITE_STAGE1_API_KEY to your .env file.");
   }
 
   const prompt = buildStage1Prompt(input);
 
   try {
-   const response = await fetchWithRetry(
-  `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 4096,
-        responseMimeType: "application/json"
+    const response = await fetchWithRetry(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${STAGE1_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: 4096,
+            responseMimeType: "application/json"
+          }
+        })
       }
-    })
-  }
-);
+    );
 
-const data = await response.json();
-return extractJSONFromGemini(data);
-
+    const data = await response.json();
+    return extractJSONFromGemini(data) || generateFallbackStage1();
 
   } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error(`Unexpected error: ${String(error)}`);
+    console.warn("Stage 1 API error:", error);
+    return generateFallbackStage1();
   }
+}
+
+function generateFallbackStage1(): Stage1Output {
+  return {
+    seller_specs: []
+  };
 }
 
 export async function extractISQWithGemini(
   input: InputData,
   urls: string[]
 ): Promise<{ config: ISQ; keys: ISQ[]; buyers: ISQ[] }> {
-  if (!GEMINI_API_KEY) {
-    throw new Error("Gemini API key is not configured. Please add VITE_GEMINI_API_KEY to your .env file.");
+  if (!STAGE2_API_KEY) {
+    throw new Error("Stage 2 API key is not configured. Please add VITE_STAGE2_API_KEY to your .env file.");
   }
-console.log("Waiting before ISQ extraction to avoid Gemini overload...");
-  await sleep(7000); // 7 seconds safe gap
-  
+
+  console.log("Waiting before ISQ extraction to avoid API overload...");
+  await sleep(7000);
+
   const urlContents = await Promise.all(urls.map(fetchURL));
   const prompt = buildISQExtractionPrompt(input, urls, urlContents);
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    const response = await fetchWithRetry(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${STAGE2_API_KEY}`,
       {
         method: "POST",
         headers: {
@@ -172,32 +182,30 @@ console.log("Waiting before ISQ extraction to avoid Gemini overload...");
       }
     );
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const errorMsg = errorData.error?.message || response.statusText;
-      throw new Error(`Gemini API error: ${response.status} - ${errorMsg}`);
-    }
-
     const data = await response.json();
+    const parsed = extractJSONFromGemini(data);
 
-    if (!data.candidates || !data.candidates[0]) {
-      throw new Error("No response from Gemini API");
+    if (parsed && parsed.config && parsed.keys) {
+      return {
+        config: parsed.config,
+        keys: parsed.keys || [],
+        buyers: parsed.buyers || []
+      };
     }
 
-    const content = data.candidates[0].content.parts[0].text;
-
-    const jsonStr = extractJSON(content);
-    if (!jsonStr) {
-      throw new Error("No valid JSON found in Gemini response");
-    }
-
-    return JSON.parse(jsonStr);
+    return generateFallbackStage2();
   } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error(`Unexpected error: ${String(error)}`);
+    console.warn("Stage 2 API error:", error);
+    return generateFallbackStage2();
   }
+}
+
+function generateFallbackStage2(): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
+  return {
+    config: { name: "Unknown", options: [] },
+    keys: [],
+    buyers: []
+  };
 }
 
 function extractJSON(text: string): string | null {
@@ -480,7 +488,7 @@ function buildISQExtractionPrompt(
   contents: string[]
 ): string {
   const urlsText = urls
-    .map((url, i) => `URL ${i + 1}: ${url}\nContent: ${contents[i].substring(0,500)}...`)
+    .map((url, i) => `URL ${i + 1}: ${url}\nContent: ${contents[i].substring(0, 500)}...`)
     .join("\n\n");
 
   return `Extract ISQs from these URLs for: ${input.mcats.map((m) => m.mcat_name).join(", ")}
@@ -490,6 +498,7 @@ ${urlsText}
 Extract:
 1. CONFIG ISQ (exactly 1): Must influence price, options must match URLs exactly
 2. KEY ISQs (exactly 3): Most repeated + category defining
+3. BUYER ISQs (maximum 2): Most important specs that buyers search for
 
 STRICT RULES:
 - DO NOT invent specs
@@ -497,19 +506,20 @@ STRICT RULES:
 - If a spec appears in only 1 URL → IGNORE it
 - If options differ, keep ONLY options that appear in AT LEAST 2 URLs
 - Do NOT guess missing options
-EXCLUSION: If spec is in MCAT Name (e.g., "Material"), exclude it.
+- EXCLUSION: If spec is in MCAT Name (e.g., "Material"), exclude it.
+- For BUYER ISQs: Include specs that buyers frequently filter/search by
 
 REQUIREMENTS:
 - Return ONLY valid JSON.
 - Absolutely no text, notes, or markdown outside JSON.
-- If you include examples, they must be inside JSON only.
 - Output MUST start with { and end with }.
-- If the JSON is split across lines or contains markdown, still return valid JSON object
+- JSON must be valid and parseable
 
 RESPOND WITH PURE JSON ONLY - Nothing else. No markdown, no explanation, just raw JSON that looks exactly like this:
 {
   "config": {"name": "...", "options": [...]},
-  "keys": [{"name": "...", "options": [...]}, ...]
+  "keys": [{"name": "...", "options": [...]}, ...],
+  "buyers": [{"name": "...", "options": [...]}, ...]
 }`;
 }
 
