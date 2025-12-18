@@ -130,6 +130,13 @@ export async function generateStage1WithGemini(
     return extractJSONFromGemini(data) || generateFallbackStage1();
 
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
+    if (errorMsg.includes("429") || errorMsg.includes("quota")) {
+      console.error("Stage 1 API Key quota exhausted or rate limited");
+      throw new Error("Stage 1 API key quota exhausted. Please check your API limits.");
+    }
+
     console.warn("Stage 1 API error:", error);
     return generateFallbackStage1();
   }
@@ -185,28 +192,32 @@ export async function extractISQWithGemini(
     const data = await response.json();
     let parsed = extractJSONFromGemini(data);
 
-if (parsed) {
-  // Partial JSON bhi accept karo
-  return {
-    config: parsed.config || { name: "", options: [] },
-    keys: parsed.keys || [],
-    buyers: parsed.buyers || []
-  };
-}
+    if (parsed && parsed.config && parsed.config.name) {
+      return {
+        config: parsed.config,
+        keys: parsed.keys || [],
+        buyers: parsed.buyers || []
+      };
+    }
 
-// JSON parsing fail hua → fallback to text
-const textContent = extractRawText(data);
-if (textContent) {
-  const fallbackParsed = parseStage2FromText(textContent); // typo fix
-  if (fallbackParsed && fallbackParsed.config) {
-    console.log("Parsed ISQ from text fallback");
-    return fallbackParsed;
-  }
-}
+    const textContent = extractRawText(data);
+    if (textContent) {
+      const fallbackParsed = parseStage2FromText(textContent);
+      if (fallbackParsed && fallbackParsed.config && fallbackParsed.config.name) {
+        console.log("Parsed ISQ from text fallback");
+        return fallbackParsed;
+      }
+    }
 
-// Dono fail → safe fallback
-return generateFallbackStage2();
+    return generateFallbackStage2();
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
+    if (errorMsg.includes("429") || errorMsg.includes("quota")) {
+      console.error("Stage 2 API Key quota exhausted or rate limited");
+      throw new Error("Stage 2 API key quota exhausted. Please check your API limits.");
+    }
+
     console.warn("Stage 2 API error:", error);
     return generateFallbackStage2();
   }
@@ -231,54 +242,71 @@ function extractRawText(response: any): string {
   }
 }
 
-function parseStage2FromText(text: string) {
+function parseStage2FromText(text: string): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } | null {
   console.warn("Stage2: Using text-based extraction");
 
-  const config = { name: "Unknown", options: [], summary: "" };
+  const config = { name: "", options: [] };
   const keys: ISQ[] = [];
   const buyers: ISQ[] = [];
 
-  // Config options (heuristic)
-  const optionMatches = text.match(
-    /(size|material|grade|thickness|type|shape|length|width)[^:\n]*[:\-]\s*([^\n]+)/gi
-  );
-  if (optionMatches) {
-    optionMatches.forEach(line => {
-      const parts = line.split(/[:\-]/);
-      const name = parts[0].trim();
-      const vals = (parts[1] || "")
-        .split(/,|\/|;/)
-        .map(v => v.trim())
-        .filter(Boolean);
+  const lines = text.split("\n").filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return null;
 
-      // If this is the main config candidate
-      if (!config.name || config.name === "Unknown") {
-        config.name = name;
-        config.options.push(...vals);
-      } else {
-        // Otherwise populate keys
-        const existing = keys.find(k => normalizeSpecName(k.name) === normalizeSpecName(name));
-        if (existing) {
-          existing.options.push(...vals.filter(v => !existing.options.includes(v)));
-        } else {
-          keys.push({ name, options: vals });
-        }
-      }
-    });
+  const specPatterns = /(size|material|grade|thickness|type|shape|length|width|color|finish|weight|capacity|brand|quality|model|variant|design)[^:\n]*[:\-\s]+([^\n]+)/gi;
+  const matches = Array.from(text.matchAll(specPatterns));
+
+  const seenNames = new Set<string>();
+  let configSet = false;
+
+  matches.slice(0, 10).forEach((match) => {
+    const name = match[1].trim();
+    const valuesStr = match[2].trim();
+    const values = valuesStr
+      .split(/,|;|\/|\band\b/)
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0 && v.length < 50)
+      .slice(0, 10);
+
+    if (values.length === 0) return;
+
+    const normalizedName = normalizeSpecName(name);
+
+    if (seenNames.has(normalizedName)) return;
+    seenNames.add(normalizedName);
+
+    if (!configSet && values.length >= 2) {
+      config.name = name;
+      config.options = values;
+      configSet = true;
+    } else if (keys.length < 3) {
+      keys.push({ name, options: values });
+    }
+  });
+
+  if (!configSet && matches.length > 0) {
+    const firstMatch = matches[0];
+    config.name = firstMatch[1].trim();
+    config.options = firstMatch[2]
+      .split(/,|;|\//)
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0 && v.length < 50)
+      .slice(0, 5);
   }
 
-  // Ensure uniqueness
-  config.options = [...new Set(config.options)];
-  keys.forEach(k => (k.options = [...new Set(k.options)]));
+  if (!config.name || config.options.length === 0) {
+    const words = text.match(/\b[a-z]{3,}(?:\s+[a-z]{3,})*\b/gi) || [];
+    if (words.length > 0) {
+      config.name = words[0];
+      config.options = words.slice(0, 5);
+    }
+  }
 
-  // Short summary for fallback
-  config.summary = text.slice(0, 300);
+  if (!config.name) return null;
 
-  return { config, keys };
+  return { config, keys, buyers };
 }
 
-
-function generateFallbackStage2(): { config: ISQ; keys: ISQ[]} {
+function generateFallbackStage2(): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
   return {
     config: { name: "Unknown", options: [] },
     keys: [],

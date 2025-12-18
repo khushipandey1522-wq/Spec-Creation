@@ -167,13 +167,15 @@ function extractCommonAndBuyerSpecs(
   stage1: Stage1Output,
   isqs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }
 ): { commonSpecs: CommonSpecItem[]; buyerISQs: BuyerISQItem[] } {
-  const stage2ISQNames = new Set([
+  const stage2ISQNamesExact = new Set([
     isqs.config.name,
     ...isqs.keys.map((k) => k.name),
   ]);
 
-  const stage2ConfigKeyNames = stage2ISQNames;
-  const stage2BuyerNames = new Set(isqs.buyers.map((b) => b.name));
+  const stage2ISQNormalized = new Map<string, string>();
+  stage2ISQNamesExact.forEach((name) => {
+    stage2ISQNormalized.set(normalizeSpecName(name), name);
+  });
 
   const primarySpecs: CommonSpecItem[] = [];
   const secondarySpecs: CommonSpecItem[] = [];
@@ -184,7 +186,10 @@ function extractCommonAndBuyerSpecs(
       const { finalized_primary_specs, finalized_secondary_specs } = mcat.finalized_specs;
 
       finalized_primary_specs.specs.forEach((spec) => {
-        if (stage2ISQNames.has(spec.spec_name)) {
+        const normalizedName = normalizeSpecName(spec.spec_name);
+        const stage2Match = stage2ISQNormalized.has(normalizedName);
+
+        if (stage2Match) {
           const filteredOptions = filterOptions(spec.options, isqs, spec.spec_name);
           primarySpecs.push({
             spec_name: spec.spec_name,
@@ -192,7 +197,7 @@ function extractCommonAndBuyerSpecs(
             input_type: spec.input_type,
             category: "Primary",
           });
-          stage1SpecMap.set(spec.spec_name, {
+          stage1SpecMap.set(normalizedName, {
             name: spec.spec_name,
             options: spec.options,
           });
@@ -200,7 +205,10 @@ function extractCommonAndBuyerSpecs(
       });
 
       finalized_secondary_specs.specs.forEach((spec) => {
-        if (stage2ISQNames.has(spec.spec_name)) {
+        const normalizedName = normalizeSpecName(spec.spec_name);
+        const stage2Match = stage2ISQNormalized.has(normalizedName);
+
+        if (stage2Match) {
           const filteredOptions = filterOptions(spec.options, isqs, spec.spec_name);
           secondarySpecs.push({
             spec_name: spec.spec_name,
@@ -208,7 +216,7 @@ function extractCommonAndBuyerSpecs(
             input_type: spec.input_type,
             category: "Secondary",
           });
-          stage1SpecMap.set(spec.spec_name, {
+          stage1SpecMap.set(normalizedName, {
             name: spec.spec_name,
             options: spec.options,
           });
@@ -217,12 +225,14 @@ function extractCommonAndBuyerSpecs(
     });
   });
 
+  const stage2ConfigKeyNormalized = new Set(
+    Array.from(stage2ISQNormalized.keys())
+  );
+
   const buyerISQs = selectTopBuyerISQs(
     primarySpecs,
     secondarySpecs,
-    isqs.buyers,
-    stage2ConfigKeyNames,
-    stage1SpecMap
+    stage2ConfigKeyNormalized
   );
 
   return {
@@ -231,16 +241,20 @@ function extractCommonAndBuyerSpecs(
   };
 }
 
+function normalizeSpecName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/sheet|plate|material|thickness|thk|type|shape|perforation|hole/g, "")
+    .trim();
+}
+
 function selectTopBuyerISQs(
   primarySpecs: CommonSpecItem[],
   secondarySpecs: CommonSpecItem[],
-  buyerISQList: ISQ[],
-  stage2ConfigKeyNames: Set<string>,
-  stage1SpecMap: Map<string, ISQ>
+  stage2ConfigKeyNormalized: Set<string>
 ): BuyerISQItem[] {
-  const primarySpecNames = new Set(primarySpecs.map((s) => s.spec_name));
-  const secondarySpecNames = new Set(secondarySpecs.map((s) => s.spec_name));
-
   const candidates: Array<{
     spec_name: string;
     options: string[];
@@ -248,23 +262,28 @@ function selectTopBuyerISQs(
     priority: number;
   }> = [];
 
-  buyerISQList.forEach((buyer) => {
-    const isPrimary = primarySpecNames.has(buyer.name);
-    const isSecondary = secondarySpecNames.has(buyer.name);
-    const isConfigKey = stage2ConfigKeyNames.has(buyer.name);
-
-    if (!isPrimary && !isSecondary) return;
-
-    let priority = 0;
-    if (isPrimary && isConfigKey) priority = 0;
-    else if (isPrimary && !isConfigKey) priority = 1;
-    else if (isSecondary && isConfigKey) priority = 2;
-    else priority = 3;
+  primarySpecs.forEach((spec) => {
+    const normalizedName = normalizeSpecName(spec.spec_name);
+    const isConfigKey = stage2ConfigKeyNormalized.has(normalizedName);
+    const priority = isConfigKey ? 0 : 1;
 
     candidates.push({
-      spec_name: buyer.name,
-      options: filterOptions(buyer.options, { config: { name: "", options: [] }, keys: [], buyers: [] }, buyer.name),
-      category: isPrimary ? "Primary" : "Secondary",
+      spec_name: spec.spec_name,
+      options: spec.options,
+      category: "Primary",
+      priority,
+    });
+  });
+
+  secondarySpecs.forEach((spec) => {
+    const normalizedName = normalizeSpecName(spec.spec_name);
+    const isConfigKey = stage2ConfigKeyNormalized.has(normalizedName);
+    const priority = isConfigKey ? 2 : 3;
+
+    candidates.push({
+      spec_name: spec.spec_name,
+      options: spec.options,
+      category: "Secondary",
       priority,
     });
   });
