@@ -183,20 +183,115 @@ export async function extractISQWithGemini(
     );
 
     const data = await response.json();
-    const parsed = extractJSONFromGemini(data);
+    let parsed = extractJSONFromGemini(data);
 
-    if (parsed && parsed.config && parsed.keys) {
+    if (parsed && parsed.config && parsed.keys && parsed.keys.length > 0) {
       return {
         config: parsed.config,
-        keys: parsed.keys || [],
+        keys: parsed.keys,
         buyers: parsed.buyers || []
       };
+    }
+
+    const textContent = extractRawText(data);
+    if (textContent) {
+      const fallbackParsed = parseISQFromText(textContent);
+      if (fallbackParsed && fallbackParsed.config) {
+        console.log("Parsed ISQ from text fallback");
+        return fallbackParsed;
+      }
     }
 
     return generateFallbackStage2();
   } catch (error) {
     console.warn("Stage 2 API error:", error);
     return generateFallbackStage2();
+  }
+}
+
+function extractRawText(response: any): string {
+  try {
+    if (!response?.candidates?.length) return "";
+
+    const parts = response.candidates[0]?.content?.parts || [];
+    let text = "";
+
+    for (const part of parts) {
+      if (typeof part.text === "string") {
+        text += part.text + "\n";
+      }
+    }
+
+    return text.trim();
+  } catch {
+    return "";
+  }
+}
+
+function parseISQFromText(text: string): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } | null {
+  try {
+    const lines = text.split("\n").filter((line) => line.trim());
+    if (lines.length === 0) return null;
+
+    const result: { config: ISQ; keys: ISQ[]; buyers: ISQ[] } = {
+      config: { name: "", options: [] },
+      keys: [],
+      buyers: [],
+    };
+
+    let currentSection = "";
+    let currentSpec: any = null;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (trimmed.match(/config|CONFIG/i)) {
+        currentSection = "config";
+        continue;
+      }
+      if (trimmed.match(/key|KEY/i)) {
+        if (currentSpec && currentSpec.name) {
+          result.keys.push(currentSpec);
+        }
+        currentSection = "keys";
+        currentSpec = null;
+        continue;
+      }
+      if (trimmed.match(/buyer|BUYER/i)) {
+        if (currentSpec && currentSpec.name) {
+          result.buyers.push(currentSpec);
+        }
+        currentSection = "buyers";
+        currentSpec = null;
+        continue;
+      }
+
+      if (trimmed.match(/^[•\-\*]/)) {
+        if (currentSection === "config" && !result.config.name) {
+          result.config.name = trimmed.replace(/^[•\-\*]\s*/, "").split(/[:,]/)[0].trim();
+        } else if (currentSpec && currentSection === "keys") {
+          if (!currentSpec.name) {
+            currentSpec.name = trimmed.replace(/^[•\-\*]\s*/, "").split(/[:,]/)[0].trim();
+            currentSpec.options = [];
+          } else {
+            currentSpec.options.push(trimmed.replace(/^[•\-\*]\s*/, ""));
+          }
+        }
+      }
+    }
+
+    if (!result.config.name && lines.length > 0) {
+      result.config.name = lines[0].replace(/^[•\-\*]\s*/, "").split(/[:,]/)[0].trim();
+    }
+
+    if (result.config.name && result.keys.length > 0) {
+      return result;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn("Text parsing failed:", error);
+    return null;
   }
 }
 
