@@ -195,7 +195,7 @@ export async function extractISQWithGemini(
 
     const textContent = extractRawText(data);
     if (textContent) {
-      const fallbackParsed = parseISQFromText(textContent);
+      const fallbackParsed = arseStage2FromText(textContent);
       if (fallbackParsed && fallbackParsed.config) {
         console.log("Parsed ISQ from text fallback");
         return fallbackParsed;
