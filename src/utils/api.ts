@@ -701,9 +701,7 @@ export function selectStage3BuyerISQs(
     ...stage2Only,
     ...stage1Only
   ];
-
-
-    return [...new Set(options)].slice(0, 8);
+    return [...new Set(finalOptionsoptions)].slice(0, 8);
   }
 
   const buyerISQs: ISQ[] = [];
