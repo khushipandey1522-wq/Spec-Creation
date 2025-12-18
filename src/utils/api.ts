@@ -593,7 +593,6 @@ ${urlsText}
 Extract:
 1. CONFIG ISQ (exactly 1): Must influence price, options must match URLs exactly
 2. KEY ISQs (exactly 3): Most repeated + category defining
-3. BUYER ISQs (maximum 2): Most important specs that buyers search for
 
 STRICT RULES:
 - DO NOT invent specs
