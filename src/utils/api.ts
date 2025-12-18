@@ -598,44 +598,73 @@ RESPOND WITH PURE JSON ONLY - Nothing else. No markdown, no explanation, just ra
 }`;
 }
 
-function selectBuyerISQs(
-  stage1ISQs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] },
-  stage2ISQs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }
+export function selectStage3BuyerISQs(
+  stage1: Stage1Output,
+  stage2: { config: ISQ; keys: ISQ[]; buyers?: ISQ[] }
 ): ISQ[] {
-  // Normalize names
-  const stage1Names = [stage1ISQs.config, ...stage1ISQs.keys, ...stage1ISQs.buyers]
-    .map(s => ({ ...s, normName: normalizeSpecName(s.name) }));
-  const stage2Names = [stage2ISQs.config, ...stage2ISQs.keys, ...stage2ISQs.buyers]
-    .map(s => ({ ...s, normName: normalizeSpecName(s.name) }));
+  // 1️⃣ Flatten Stage1 specs with tier info
+  const stage1All: (ISQ & { tier: string; normName: string })[] = [];
+  stage1.seller_specs.forEach(ss => {
+    ss.mcats.forEach(mcat => {
+      const { finalized_primary_specs, finalized_secondary_specs } = mcat.finalized_specs;
 
-  const common = stage1Names.filter(s1 =>
-    stage2Names.some(s2 => s2.normName === s1.normName)
+      finalized_primary_specs.specs.forEach(s =>
+        stage1All.push({ ...s, tier: "Primary", normName: normalizeSpecName(s.spec_name) })
+      );
+      finalized_secondary_specs.specs.forEach(s =>
+        stage1All.push({ ...s, tier: "Secondary", normName: normalizeSpecName(s.spec_name) })
+      );
+    });
+  });
+
+  // 2️⃣ Flatten Stage2 specs
+  const stage2All: (ISQ & { normName: string })[] = [
+    stage2.config,
+    ...stage2.keys,
+    ...(stage2.buyers || [])
+  ].map(s => ({ ...s, normName: normalizeSpecName(s.name) }));
+
+  // 3️⃣ Find common specs
+  const commonSpecs = stage1All.filter(s1 =>
+    stage2All.some(s2 => s2.normName === s1.normName)
   );
 
-  // Priority: Primary (config) -> Secondary (keys)
-  const primary = common.filter(s => normalizeSpecName(s.name) === normalizeSpecName(stage1ISQs.config.name));
-  const secondary = common.filter(s => !primary.includes(s));
+  // 4️⃣ Select top 2 buyer ISQs
+  // Priority: Stage1 Primary → Stage1 Secondary
+  let primarySpec = commonSpecs.find(s => s.tier === "Primary");
+  if (!primarySpec) {
+    primarySpec = commonSpecs.find(s => s.tier === "Secondary");
+  }
 
-  const selected: ISQ[] = [];
-  if (primary.length) selected.push(primary[0]);
-  if (selected.length < 2 && secondary.length) selected.push(secondary[0]);
+  const secondarySpec = commonSpecs.find(
+    s => s.normName !== primarySpec?.normName
+  );
 
-  return selected.slice(0, 2); // Max 2
+  // 5️⃣ Merge top 8 options: Stage2 first, Stage1 supplement
+  function getTopOptions(normName: string) {
+    const s2 = stage2All.find(s => s.normName === normName);
+    const s1 = stage1All.find(s => s.normName === normName);
+
+    let options: string[] = [];
+    if (s2?.options) options.push(...s2.options);
+    if (s1?.options) {
+      const needed = 8 - options.length;
+      const additional = s1.options.filter(o => !options.includes(o)).slice(0, needed);
+      options.push(...additional);
+    }
+
+    return [...new Set(options)].slice(0, 8);
+  }
+
+  const buyerISQs: ISQ[] = [];
+  if (primarySpec)
+    buyerISQs.push({ name: primarySpec.name, options: getTopOptions(primarySpec.normName) });
+  if (secondarySpec)
+    buyerISQs.push({ name: secondarySpec.name, options: getTopOptions(secondarySpec.normName) });
+
+  return buyerISQs;
 }
 
-export async function generateExcel(
-  stage1: Stage1Output,
-  isqs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }
-): Promise<ExcelData> {
-  return {
-    master_specs: extractSpecNames(stage1),
-    website_evidence: isqs.keys.map((k) => ({ name: k.name, count: 1 })),
-    final_isqs: [
-      { type: "Config", ...isqs.config },
-      ...isqs.keys.map((k) => ({ type: "Key", ...k })),
-    ],
-  };
-}
 
 function extractSpecNames(stage1: Stage1Output): unknown[] {
   const specs: unknown[] = [];
