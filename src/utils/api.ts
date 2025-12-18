@@ -235,38 +235,46 @@ function parseStage2FromText(text: string) {
   console.warn("Stage2: Using text-based extraction");
 
   const config = { name: "Unknown", options: [], summary: "" };
-  const keys: any[] = [];
+  const keys: ISQ[] = [];
+  const buyers: ISQ[] = [];
 
-  // Extract config options (basic heuristic)
+  // Config options (heuristic)
   const optionMatches = text.match(
     /(size|material|grade|thickness|type|shape|length|width)[^:\n]*[:\-]\s*([^\n]+)/gi
   );
-
   if (optionMatches) {
     optionMatches.forEach(line => {
       const parts = line.split(/[:\-]/);
-      if (parts[1]) {
-        parts[1]
-          .split(/,|\/|;/)
-          .map(v => v.trim())
-          .filter(Boolean)
-          .forEach(v => config.options.push(v));
+      const name = parts[0].trim();
+      const vals = (parts[1] || "")
+        .split(/,|\/|;/)
+        .map(v => v.trim())
+        .filter(Boolean);
+
+      // If this is the main config candidate
+      if (!config.name || config.name === "Unknown") {
+        config.name = name;
+        config.options.push(...vals);
+      } else {
+        // Otherwise populate keys
+        const existing = keys.find(k => normalizeSpecName(k.name) === normalizeSpecName(name));
+        if (existing) {
+          existing.options.push(...vals.filter(v => !existing.options.includes(v)));
+        } else {
+          keys.push({ name, options: vals });
+        }
       }
     });
   }
 
-  // Extract keys heuristically
-  const keyWords = ["size","thickness","material","grade","shape","length","width"];
-  keyWords.forEach(k => {
-    if (text.toLowerCase().includes(k)) {
-      keys.push({ name: k, options: [] });
-    }
-  });
+  // Ensure uniqueness
+  config.options = [...new Set(config.options)];
+  keys.forEach(k => (k.options = [...new Set(k.options)]));
 
-  // Even if keys empty, return config
+  // Short summary for fallback
   config.summary = text.slice(0, 300);
 
-  return { config, keys, buyers: [] };
+  return { config, keys };
 }
 
 
