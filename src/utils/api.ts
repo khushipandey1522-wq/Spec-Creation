@@ -601,7 +601,6 @@ STRICT RULES:
 - If options differ, keep ONLY options that appear in AT LEAST 2 URLs
 - Do NOT guess missing options
 - EXCLUSION: If spec is in MCAT Name (e.g., "Material"), exclude it.
-- For BUYER ISQs: Include specs that buyers frequently filter/search by
 
 REQUIREMENTS:
 - Return ONLY valid JSON.
@@ -612,8 +611,7 @@ REQUIREMENTS:
 RESPOND WITH PURE JSON ONLY - Nothing else. No markdown, no explanation, just raw JSON that looks exactly like this:
 {
   "config": {"name": "...", "options": [...]},
-  "keys": [{"name": "...", "options": [...]}, ...],
-  "buyers": [{"name": "...", "options": [...]}, ...]
+  "keys": [{"name": "...", "options": [...]}, ...]
 }`;
 }
 
