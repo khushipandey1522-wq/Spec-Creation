@@ -270,7 +270,7 @@ function parseStage2FromText(text: string) {
 }
 
 
-function generateFallbackStage2(): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
+function generateFallbackStage2(): { config: ISQ; keys: ISQ[]} {
   return {
     config: { name: "Unknown", options: [] },
     keys: [],
