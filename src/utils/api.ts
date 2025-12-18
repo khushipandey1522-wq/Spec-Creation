@@ -706,8 +706,6 @@ export function selectStage3BuyerISQs(
   return [...new Set(finalOptions)].slice(0, 8);
 }
 
-    return [...new Set(options)].slice(0, 8);
-  }
 
   const buyerISQs: ISQ[] = [];
   if (primarySpec)
