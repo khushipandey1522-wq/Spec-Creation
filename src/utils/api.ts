@@ -673,13 +673,38 @@ export function selectStage3BuyerISQs(
     const s2 = stage2All.find(s => s.normName === normName);
     const s1 = stage1All.find(s => s.normName === normName);
 
-    let options: string[] = [];
-    if (s2?.options) options.push(...s2.options);
-    if (s1?.options) {
-      const needed = 8 - options.length;
-      const additional = s1.options.filter(o => !options.includes(o)).slice(0, needed);
-      options.push(...additional);
-    }
+   function getTopOptions(normName: string) {
+  const s2 = stage2All.find(s => s.normName === normName);
+  const s1 = stage1All.find(s => s.normName === normName);
+
+  const stage2Options = s2?.options || [];
+  const stage1Options = s1?.options || [];
+
+  // 1️⃣ Common options (Stage1 ∩ Stage2)
+  const commonOptions = stage2Options.filter(o =>
+    stage1Options.includes(o)
+  );
+
+  // 2️⃣ Stage2-only options
+  const stage2Only = stage2Options.filter(o =>
+    !commonOptions.includes(o)
+  );
+
+  // 3️⃣ Stage1-only options (final fallback)
+  const stage1Only = stage1Options.filter(o =>
+    !commonOptions.includes(o) && !stage2Only.includes(o)
+  );
+
+  // 4️⃣ Final ordered list
+  const finalOptions = [
+    ...commonOptions,
+    ...stage2Only,
+    ...stage1Only
+  ];
+
+  // 5️⃣ Deduplicate + cap at 8
+  return [...new Set(finalOptions)].slice(0, 8);
+}
 
     return [...new Set(options)].slice(0, 8);
   }
