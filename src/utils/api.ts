@@ -185,24 +185,27 @@ export async function extractISQWithGemini(
     const data = await response.json();
     let parsed = extractJSONFromGemini(data);
 
-    if (parsed && parsed.config && parsed.keys && parsed.keys.length > 0) {
-      return {
-        config: parsed.config,
-        keys: parsed.keys,
-        buyers: parsed.buyers || []
-      };
-    }
+if (parsed) {
+  // Partial JSON bhi accept karo
+  return {
+    config: parsed.config || { name: "", options: [] },
+    keys: parsed.keys || [],
+    buyers: parsed.buyers || []
+  };
+}
 
-    const textContent = extractRawText(data);
-    if (textContent) {
-      const fallbackParsed = arseStage2FromText(textContent);
-      if (fallbackParsed && fallbackParsed.config) {
-        console.log("Parsed ISQ from text fallback");
-        return fallbackParsed;
-      }
-    }
+// JSON parsing fail hua → fallback to text
+const textContent = extractRawText(data);
+if (textContent) {
+  const fallbackParsed = parseStage2FromText(textContent); // typo fix
+  if (fallbackParsed && fallbackParsed.config) {
+    console.log("Parsed ISQ from text fallback");
+    return fallbackParsed;
+  }
+}
 
-    return generateFallbackStage2();
+// Dono fail → safe fallback
+return generateFallbackStage2();
   } catch (error) {
     console.warn("Stage 2 API error:", error);
     return generateFallbackStage2();
