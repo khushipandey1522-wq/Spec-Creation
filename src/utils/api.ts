@@ -673,10 +673,6 @@ export function selectStage3BuyerISQs(
     const s2 = stage2All.find(s => s.normName === normName);
     const s1 = stage1All.find(s => s.normName === normName);
 
-   function getTopOptions(normName: string) {
-  const s2 = stage2All.find(s => s.normName === normName);
-  const s1 = stage1All.find(s => s.normName === normName);
-
   const stage2Options = s2?.options || [];
   const stage1Options = s1?.options || [];
 
