@@ -228,72 +228,44 @@ function extractRawText(response: any): string {
   }
 }
 
-function parseISQFromText(text: string): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } | null {
-  try {
-    const lines = text.split("\n").filter((line) => line.trim());
-    if (lines.length === 0) return null;
+function parseStage2FromText(text: string) {
+  console.warn("Stage2: Using text-based extraction");
 
-    const result: { config: ISQ; keys: ISQ[]; buyers: ISQ[] } = {
-      config: { name: "", options: [] },
-      keys: [],
-      buyers: [],
-    };
+  const config = { name: "Unknown", options: [], summary: "" };
+  const keys: any[] = [];
 
-    let currentSection = "";
-    let currentSpec: any = null;
+  // Extract config options (basic heuristic)
+  const optionMatches = text.match(
+    /(size|material|grade|thickness|type|shape|length|width)[^:\n]*[:\-]\s*([^\n]+)/gi
+  );
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-
-      if (trimmed.match(/config|CONFIG/i)) {
-        currentSection = "config";
-        continue;
+  if (optionMatches) {
+    optionMatches.forEach(line => {
+      const parts = line.split(/[:\-]/);
+      if (parts[1]) {
+        parts[1]
+          .split(/,|\/|;/)
+          .map(v => v.trim())
+          .filter(Boolean)
+          .forEach(v => config.options.push(v));
       }
-      if (trimmed.match(/key|KEY/i)) {
-        if (currentSpec && currentSpec.name) {
-          result.keys.push(currentSpec);
-        }
-        currentSection = "keys";
-        currentSpec = null;
-        continue;
-      }
-      if (trimmed.match(/buyer|BUYER/i)) {
-        if (currentSpec && currentSpec.name) {
-          result.buyers.push(currentSpec);
-        }
-        currentSection = "buyers";
-        currentSpec = null;
-        continue;
-      }
-
-      if (trimmed.match(/^[•\-\*]/)) {
-        if (currentSection === "config" && !result.config.name) {
-          result.config.name = trimmed.replace(/^[•\-\*]\s*/, "").split(/[:,]/)[0].trim();
-        } else if (currentSpec && currentSection === "keys") {
-          if (!currentSpec.name) {
-            currentSpec.name = trimmed.replace(/^[•\-\*]\s*/, "").split(/[:,]/)[0].trim();
-            currentSpec.options = [];
-          } else {
-            currentSpec.options.push(trimmed.replace(/^[•\-\*]\s*/, ""));
-          }
-        }
-      }
-    }
-
-    if (!result.config.name && lines.length > 0) {
-      result.config.name = lines[0].replace(/^[•\-\*]\s*/, "").split(/[:,]/)[0].trim();
-    }
-
-    if (result.config.name && result.keys.length > 0) {
-      return result;
-    }
-
-    return null;
-  } catch (error) {
-    console.warn("Text parsing failed:", error);
-    return null;
+    });
   }
+
+  // Extract keys heuristically
+  const keyWords = ["size","thickness","material","grade","shape","length","width"];
+  keyWords.forEach(k => {
+    if (text.toLowerCase().includes(k)) {
+      keys.push({ name: k, options: [] });
+    }
+  });
+
+  // Even if keys empty, return config
+  config.summary = text.slice(0, 300);
+
+  return { config, keys, buyers: [] };
 }
+
 
 function generateFallbackStage2(): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
   return {
