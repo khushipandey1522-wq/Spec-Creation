@@ -598,6 +598,31 @@ RESPOND WITH PURE JSON ONLY - Nothing else. No markdown, no explanation, just ra
 }`;
 }
 
+function selectBuyerISQs(
+  stage1ISQs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] },
+  stage2ISQs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }
+): ISQ[] {
+  // Normalize names
+  const stage1Names = [stage1ISQs.config, ...stage1ISQs.keys, ...stage1ISQs.buyers]
+    .map(s => ({ ...s, normName: normalizeSpecName(s.name) }));
+  const stage2Names = [stage2ISQs.config, ...stage2ISQs.keys, ...stage2ISQs.buyers]
+    .map(s => ({ ...s, normName: normalizeSpecName(s.name) }));
+
+  const common = stage1Names.filter(s1 =>
+    stage2Names.some(s2 => s2.normName === s1.normName)
+  );
+
+  // Priority: Primary (config) -> Secondary (keys)
+  const primary = common.filter(s => normalizeSpecName(s.name) === normalizeSpecName(stage1ISQs.config.name));
+  const secondary = common.filter(s => !primary.includes(s));
+
+  const selected: ISQ[] = [];
+  if (primary.length) selected.push(primary[0]);
+  if (selected.length < 2 && secondary.length) selected.push(secondary[0]);
+
+  return selected.slice(0, 2); // Max 2
+}
+
 export async function generateExcel(
   stage1: Stage1Output,
   isqs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }
