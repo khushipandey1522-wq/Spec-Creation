@@ -702,10 +702,9 @@ export function selectStage3BuyerISQs(
     ...stage1Only
   ];
 
-  // 5️⃣ Deduplicate + cap at 8
-  return [...new Set(finalOptions)].slice(0, 8);
-}
 
+    return [...new Set(options)].slice(0, 8);
+  }
 
   const buyerISQs: ISQ[] = [];
   if (primarySpec)
