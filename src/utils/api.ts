@@ -598,33 +598,75 @@ function buildISQExtractionPrompt(
     .map((url, i) => `URL ${i + 1}: ${url}\nContent: ${contents[i].substring(0, 1000)}...`)
     .join("\n\n");
 
-  return `Extract ISQs from these URLs for: ${input.mcats.map((m) => m.mcat_name).join(", ")}
+  return `Extract ISQs from these URLs related to these MCATs: ${input.mcats.map((m) => m.mcat_name).join(", ")}
 
+URLs:
 ${urlsText}
 
-Extract:
-1. CONFIG ISQ (exactly 1): Must influence price, options must match URLs exactly
-2. KEY ISQs (exactly 3): Most repeated + category defining
+Your task is to extract Buyer ISQs ONLY from the content of these URLs.
 
-STRICT RULES:
-- DO NOT invent specs
-- Extract ONLY specs that appear in AT LEAST 2 URLs
-- If a spec appears in only 1 URL → IGNORE it
-- If options differ, keep ONLY options that appear in AT LEAST 2 URLs
-- Do NOT guess missing options
-- EXCLUSION: If spec is in MCAT Name (e.g., "Material"), exclude it.
+Extract exactly:
+1 CONFIG ISQ
+3 KEY ISQs
 
-REQUIREMENTS:
-- Return ONLY valid JSON.
-- Absolutely no text, notes, or markdown outside JSON.
-- Output MUST start with { and end with }.
-- JSON must be valid and parseable
+CONFIG ISQ rules:
+- Must strongly influence price or configuration
+- Must appear in AT LEAST 2 different URLs
+- Options must be copied EXACTLY from the URLs
+- Must have AT LEAST 2 shared options
+- If a spec is selected as CONFIG, it MUST NOT appear again as a KEY ISQ
 
-RESPOND WITH PURE JSON ONLY - Nothing else. No markdown, no explanation, just raw JSON that looks exactly like this:
+KEY ISQ rules:
+- Category-defining and most frequently repeated specifications
+- Must appear in AT LEAST 2 different URLs
+- Options must be copied EXACTLY from the URLs
+- Must have AT LEAST 2 shared options
+- Specs must be UNIQUE and different from the CONFIG ISQ
+
+Strict rules for ALL ISQs:
+- DO NOT invent, assume, normalize, or guess any specification
+- DO NOT guess missing options
+- Extract ONLY what is explicitly written in the URLs
+- A spec appearing in only 1 URL must be ignored
+- If options vary, keep ONLY those options that appear in AT LEAST 2 URLs
+- Options must be UNIQUE (no duplicate values in the options array)
+- Every ISQ MUST include a non-empty "options": [] array
+- If you cannot find at least 2 shared options for a spec, DO NOT use that spec
+  → choose a different spec that satisfies the Rule of Two
+
+Exclusions:
+- If a specification is already part of the MCAT name (for example: Material, Capacity, Voltage), exclude it completely
+- Do not repeat or overlap specifications
+
+Output rules:
+- Return ONLY valid JSON
+- No text, no notes, no markdown
+- Output must start with { and end with }
+- JSON must be fully parseable
+
+Use EXACTLY this JSON structure:
 {
-  "config": {"name": "...", "options": [...]},
-  "keys": [{"name": "...", "options": [...]}, ...]
-}`;
+  "config": {
+    "name": "Specification Name",
+    "options": ["Option 1", "Option 2"]
+  },
+  "keys": [
+    {
+      "name": "Specification Name",
+      "options": ["Option 1", "Option 2"]
+    },
+    {
+      "name": "Specification Name",
+      "options": ["Option 1", "Option 2"]
+    },
+    {
+      "name": "Specification Name",
+      "options": ["Option 1", "Option 2"]
+    }
+  ]
+}
+
+Respond with PURE JSON ONLY. Nothing else.`;
 }
 
 export function selectStage3BuyerISQs(
