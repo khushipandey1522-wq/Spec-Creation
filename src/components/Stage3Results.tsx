@@ -8,6 +8,7 @@ interface Stage3ResultsProps {
     keys: ISQ[];
     buyers: ISQ[];
   };
+  buyerISQs: ISQ[];
 }
 
 interface CommonSpecItem {
@@ -23,12 +24,12 @@ interface BuyerISQItem {
   category: "Primary" | "Secondary";
 }
 
-export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) {
+export default function Stage3Results({ stage1Data, isqs, buyerISQs }: Stage3ResultsProps) {
   if (!isqs || (!isqs.config && !isqs.keys?.length)) {
     return <div className="text-gray-500">No ISQ data found</div>;
   }
 
-  const { commonSpecs, buyerISQs } = extractCommonAndBuyerSpecs(stage1Data, isqs);
+  const { commonSpecs } = extractCommonAndBuyerSpecs(stage1Data, isqs);
 
   const primaryCommonSpecs = commonSpecs.filter((s) => s.category === "Primary");
   const secondaryCommonSpecs = commonSpecs.filter((s) => s.category === "Secondary");
@@ -83,13 +84,13 @@ export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) 
               </h3>
               <p className="text-xs text-amber-700 mb-4">Selected from common specs based on buyer search patterns</p>
 
-              {buyerISQs.length > 0 ? (
+              {buyerISQs && buyerISQs.length > 0 ? (
                 <div className="space-y-3">
                   {buyerISQs.map((spec, idx) => (
                     <div key={idx} className="bg-white border border-amber-200 p-4 rounded-lg">
-                      <div className="font-semibold text-amber-900 mb-2">{spec.spec_name}</div>
+                      <div className="font-semibold text-amber-900 mb-2">{spec.name}</div>
                       <div className="flex flex-wrap gap-2">
-                        {spec.options.map((option, oIdx) => (
+                        {spec.options && spec.options.map((option, oIdx) => (
                           <span
                             key={oIdx}
                             className="inline-block bg-amber-100 text-amber-800 px-2 py-1 rounded text-xs font-medium"
@@ -103,7 +104,7 @@ export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) 
                 </div>
               ) : (
                 <div className="bg-white border border-amber-200 p-4 rounded-lg text-center">
-                  <p className="text-sm text-gray-600">No buyer ISQs available</p>
+                  <p className="text-sm text-gray-600">Generating buyer ISQs...</p>
                 </div>
               )}
             </div>

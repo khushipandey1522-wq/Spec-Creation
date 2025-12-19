@@ -3,7 +3,7 @@ import Stage0Input from "./components/Stage0Input";
 import Stage1Results from "./components/Stage1Results";
 import Stage2Results from "./components/Stage2Results";
 import Stage3Results from "./components/Stage3Results";
-import { generateStage1WithGemini, extractISQWithGemini } from "./utils/api";
+import { generateStage1WithGemini, extractISQWithGemini, generateStage3BuyerISQs } from "./utils/api";
 import { generateExcelFile } from "./utils/excel";
 import type { InputData, Stage1Output, ISQ } from "./types";
 import { Download, RefreshCw } from "lucide-react";
@@ -15,6 +15,7 @@ function App() {
   const [inputData, setInputData] = useState<InputData | null>(null);
   const [stage1Data, setStage1Data] = useState<Stage1Output | null>(null);
   const [isqs, setIsqs] = useState<{ config: ISQ; keys: ISQ[]; buyers: ISQ[] } | null>(null);
+  const [stage3BuyerISQs, setStage3BuyerISQs] = useState<ISQ[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"stage1" | "stage2" | "stage3">("stage1");
@@ -26,6 +27,7 @@ function App() {
     setError("");
     setStage1Data(null);
     setIsqs(null);
+    setStage3BuyerISQs([]);
     setActiveTab("stage1");
 
     try {
@@ -36,6 +38,11 @@ function App() {
       setProcessingStage("Extracting Stage 2 ISQs from URLs...");
       const result2 = await extractISQWithGemini(data, data.urls);
       setIsqs(result2);
+
+      setProcessingStage("Generating Stage 3 Buyer ISQs...");
+      const commonSpecs = extractCommonSpecs(result1, result2).common_specs;
+      const result3 = await generateStage3BuyerISQs(result1, result2, commonSpecs);
+      setStage3BuyerISQs(result3);
 
       setProcessingStage("All stages complete!");
       setStage("stages");
@@ -48,11 +55,17 @@ function App() {
     }
   };
 
+  const handleRetry = async () => {
+    if (!inputData) return;
+    await handleStage0Submit(inputData);
+  };
+
   const handleReset = () => {
     setStage("stage0");
     setInputData(null);
     setStage1Data(null);
     setIsqs(null);
+    setStage3BuyerISQs([]);
     setError("");
     setActiveTab("stage1");
   };
@@ -82,11 +95,11 @@ function App() {
 
   const handleDownloadStage3JSON = () => {
     if (!stage1Data || !isqs) return;
-    const { common_specs, buyer_isqs } = extractCommonSpecs(stage1Data, isqs);
+    const { common_specs } = extractCommonSpecs(stage1Data, isqs);
     downloadJSON(
       {
         common_specifications: common_specs,
-        buyer_isqs: buyer_isqs,
+        buyer_isqs: stage3BuyerISQs,
       },
       "stage3_output.json"
     );
@@ -124,13 +137,24 @@ function App() {
                   <h1 className="text-3xl font-bold text-gray-900">Specification Results</h1>
                   <p className="text-gray-600 mt-1">View all three stages in the tabs below</p>
                 </div>
-                <button
-                  onClick={handleReset}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white font-semibold rounded-lg hover:from-gray-700 hover:to-gray-800 transition"
-                >
-                  <RefreshCw size={20} />
-                  Reset
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleRetry}
+                    disabled={loading}
+                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw size={20} />
+                    Retry
+                  </button>
+                  <button
+                    onClick={handleReset}
+                    disabled={loading}
+                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white font-semibold rounded-lg hover:from-gray-700 hover:to-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw size={20} />
+                    Reset
+                  </button>
+                </div>
               </div>
 
               <div className="border-b border-gray-200 mb-8">
@@ -206,7 +230,7 @@ function App() {
 
               {activeTab === "stage3" && isqs && stage1Data && (
                 <>
-                  <Stage3Results stage1Data={stage1Data} isqs={isqs} />
+                  <Stage3Results stage1Data={stage1Data} isqs={isqs} buyerISQs={stage3BuyerISQs} />
                   <div className="mt-8 pt-8 border-t border-gray-200">
                     <button
                       onClick={handleDownloadStage3JSON}

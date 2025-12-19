@@ -99,6 +99,7 @@ function extractJSONFromGemini(response) {
 
 const STAGE1_API_KEY = (import.meta.env.VITE_STAGE1_API_KEY || "").trim();
 const STAGE2_API_KEY = (import.meta.env.VITE_STAGE2_API_KEY || "").trim();
+const STAGE3_API_KEY = (import.meta.env.VITE_STAGE3_API_KEY || "").trim();
 
 export async function generateStage1WithGemini(
   input: InputData
@@ -763,4 +764,133 @@ function extractAllSpecNames(specs: Stage1Output): string[] {
     });
   });
   return names;
+}
+
+export async function generateStage3BuyerISQs(
+  stage1Data: Stage1Output,
+  stage2ISQs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] },
+  commonSpecs: Array<{ spec_name: string; options: string[]; category: string }>
+): Promise<ISQ[]> {
+  if (!STAGE3_API_KEY) {
+    throw new Error("Stage 3 API key is not configured. Please add VITE_STAGE3_API_KEY to your .env file.");
+  }
+
+  const prompt = buildStage3Prompt(stage1Data, stage2ISQs, commonSpecs);
+
+  try {
+    const response = await fetchWithRetry(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${STAGE3_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.5,
+            maxOutputTokens: 2048,
+            responseMimeType: "application/json"
+          }
+        })
+      }
+    );
+
+    const data = await response.json();
+    const parsed = extractJSONFromGemini(data);
+
+    if (parsed && parsed.buyer_isqs && Array.isArray(parsed.buyer_isqs)) {
+      return parsed.buyer_isqs.slice(0, 2).map((isq: any) => ({
+        name: isq.name || isq.spec_name || "",
+        options: (isq.options || []).slice(0, 8)
+      }));
+    }
+
+    return generateFallbackStage3(commonSpecs);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
+    if (errorMsg.includes("429") || errorMsg.includes("quota")) {
+      console.error("Stage 3 API Key quota exhausted or rate limited");
+      throw new Error("Stage 3 API key quota exhausted. Please check your API limits.");
+    }
+
+    console.warn("Stage 3 API error:", error);
+    return generateFallbackStage3(commonSpecs);
+  }
+}
+
+function generateFallbackStage3(commonSpecs: Array<{ spec_name: string; options: string[]; category: string }>): ISQ[] {
+  const primarySpecs = commonSpecs.filter((s) => s.category === "Primary");
+  const secondarySpecs = commonSpecs.filter((s) => s.category === "Secondary");
+  const candidates = primarySpecs.length > 0 ? primarySpecs : secondarySpecs;
+
+  return candidates.slice(0, 2).map((spec) => ({
+    name: spec.spec_name,
+    options: spec.options.slice(0, 8)
+  }));
+}
+
+function buildStage3Prompt(
+  stage1Data: Stage1Output,
+  stage2ISQs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] },
+  commonSpecs: Array<{ spec_name: string; options: string[]; category: string }>
+): string {
+  const commonSpecsList = commonSpecs
+    .map((s) => `- ${s.spec_name} (${s.category}): ${s.options.join(", ")}`)
+    .join("\n");
+
+  const stage1SpecsList = [];
+  stage1Data.seller_specs.forEach((ss) => {
+    ss.mcats.forEach((mcat) => {
+      const { finalized_primary_specs, finalized_secondary_specs } = mcat.finalized_specs;
+      finalized_primary_specs.specs.forEach((s) => {
+        stage1SpecsList.push(`- ${s.spec_name} (Primary): ${s.options.join(", ")}`);
+      });
+      finalized_secondary_specs.specs.forEach((s) => {
+        stage1SpecsList.push(`- ${s.spec_name} (Secondary): ${s.options.join(", ")}`);
+      });
+    });
+  });
+
+  const stage2KeysList = stage2ISQs.keys
+    .map((k) => `- ${k.name}: ${k.options.join(", ")}`)
+    .join("\n");
+
+  return `You are generating Buyer ISQs for Stage 3.
+
+Input:
+- Stage 1 specifications with options and Primary/Secondary tags
+- Stage 2 specifications with options
+- List of common specifications (left-hand side list)
+
+Stage 1 Specifications:
+${stage1SpecsList.join("\n")}
+
+Stage 2 Key Specifications:
+${stage2KeysList}
+
+Common Specifications (Intersection of Stage 1 & Stage 2):
+${commonSpecsList}
+
+Rules:
+- Select Buyer specifications ONLY from the common specifications list above.
+- Select EXACTLY 2 Buyer Specifications.
+- Prefer Primary common specs; if not available, use Secondary common specs.
+- For each Buyer Specification, show MAX 8 options.
+- Option priority:
+  1. Options present in both Stage 1 and Stage 2
+  2. Options present only in Stage 1
+- If fewer than 8 options exist, show all available.
+- Do not invent options.
+
+Return ONLY valid JSON with this structure:
+{
+  "buyer_isqs": [
+    {
+      "name": "Specification Name",
+      "options": ["option1", "option2", ...]
+    }
+  ]
+}
+
+Do NOT add any explanation, notes, or text before or after JSON.`;
 }
