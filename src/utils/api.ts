@@ -1,6 +1,11 @@
 import type { InputData, Stage1Output, ISQ, ExcelData } from "../types";
 
 function normalizeSpecName(name: string): string {
+  // Fix: Handle cases where name might not be a string
+  if (!name || typeof name !== 'string') {
+    return '';
+  }
+  
   return name
     .toLowerCase()
     .replace(/sheet|plate|material/g, "")
@@ -147,12 +152,13 @@ function generateFallbackStage1(): Stage1Output {
   };
 }
 
-// ========== STAGE 2 ENHANCED WITH 3-PROMPT VALIDATION SYSTEM ==========
+// ========== STAGE 2 - EXTRACTION ONLY (NO BUYER ISQs) ==========
 
 export async function extractISQWithGemini(
   input: InputData,
   urls: string[]
 ): Promise<{ config: ISQ; keys: ISQ[]; buyers: ISQ[] }> {
+  // FIX: Stage 2 should NOT return Buyer ISQs - return empty array
   if (!STAGE2_API_KEY) {
     throw new Error("Stage 2 API key is not configured. Please add VITE_STAGE2_API_KEY to your .env file.");
   }
@@ -166,7 +172,7 @@ export async function extractISQWithGemini(
     
     if (result && isValidISQSet(result)) {
       console.log("Stage 2: First attempt successful");
-      return result;
+      return { ...result, buyers: [] }; // Empty buyers array
     }
 
     console.log("Stage 2: First attempt failed, trying validation prompt...");
@@ -177,7 +183,7 @@ export async function extractISQWithGemini(
     
     if (validatedResult && isValidISQSet(validatedResult)) {
       console.log("Stage 2: Validation attempt successful");
-      return validatedResult;
+      return { ...validatedResult, buyers: [] }; // Empty buyers array
     }
 
     console.log("Stage 2: Validation failed, trying fallback prompt...");
@@ -188,15 +194,16 @@ export async function extractISQWithGemini(
     
     if (fallbackResult && isValidISQSet(fallbackResult)) {
       console.log("Stage 2: Fallback attempt successful");
-      return fallbackResult;
+      return { ...fallbackResult, buyers: [] }; // Empty buyers array
     }
 
     console.log("Stage 2: All attempts failed, using text-based extraction");
     const textResult = await extractFromURLsDirectly(urls);
     if (textResult && isValidISQSet(textResult)) {
-      return textResult;
+      return { ...textResult, buyers: [] }; // Empty buyers array
     }
 
+    // Return fallback with empty buyers array
     return generateFallbackStage2();
 
   } catch (error) {
@@ -213,7 +220,7 @@ export async function extractISQWithGemini(
     try {
       const directResult = await extractFromURLsDirectly(urls);
       if (directResult && isValidISQSet(directResult)) {
-        return directResult;
+        return { ...directResult, buyers: [] }; // Empty buyers array
       }
     } catch (e) {
       console.error("Direct extraction also failed:", e);
@@ -227,7 +234,7 @@ async function attemptExtraction(
   input: InputData,
   urls: string[],
   attemptType: "first" | "validation" | "fallback"
-): Promise<{ config: ISQ; keys: ISQ[]; buyers: ISQ[] } | null> {
+): Promise<{ config: ISQ; keys: ISQ[] } | null> {
   const urlContents = await Promise.all(urls.map(fetchURL));
   
   let prompt: string;
@@ -272,9 +279,14 @@ async function attemptExtraction(
       const uniqueKeys = removeDuplicateSpecs(parsed.keys, parsed.config.name);
       
       return {
-        config: parsed.config,
-        keys: uniqueKeys.slice(0, 3),
-        buyers: []
+        config: {
+          name: String(parsed.config.name || ""),
+          options: Array.isArray(parsed.config.options) ? parsed.config.options.map(String) : []
+        },
+        keys: uniqueKeys.slice(0, 3).map(key => ({
+          name: String(key.name || ""),
+          options: Array.isArray(key.options) ? key.options.map(String) : []
+        }))
       };
     }
 
@@ -290,22 +302,30 @@ function removeDuplicateSpecs(keys: ISQ[], configName: string): ISQ[] {
   const unique: ISQ[] = [];
   
   // Normalize config name
-  const normalizedConfigName = normalizeSpecName(configName);
+  const normalizedConfigName = normalizeSpecName(String(configName || ""));
   seen.add(normalizedConfigName);
   
   for (const key of keys) {
-    const normalizedKeyName = normalizeSpecName(key.name);
+    const normalizedKeyName = normalizeSpecName(String(key.name || ""));
     if (!seen.has(normalizedKeyName)) {
       seen.add(normalizedKeyName);
-      unique.push(key);
+      unique.push({
+        name: String(key.name || ""),
+        options: Array.isArray(key.options) ? key.options.map(String) : []
+      });
     }
   }
   
   return unique;
 }
 
-function isValidISQSet(result: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }): boolean {
-  if (!result.config || !result.config.name || !result.config.options || result.config.options.length < 2) {
+function isValidISQSet(result: { config: ISQ; keys: ISQ[] }): boolean {
+  // Fix: Ensure all properties are strings
+  if (!result.config || !result.config.name || typeof result.config.name !== 'string') {
+    return false;
+  }
+  
+  if (!Array.isArray(result.config.options) || result.config.options.length < 2) {
     return false;
   }
   
@@ -315,7 +335,7 @@ function isValidISQSet(result: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }): boo
   
   // Check for duplicates
   const allNames = [result.config.name, ...result.keys.map(k => k.name)];
-  const normalizedNames = allNames.map(normalizeSpecName);
+  const normalizedNames = allNames.map(name => normalizeSpecName(String(name || "")));
   const uniqueNames = new Set(normalizedNames);
   
   if (uniqueNames.size !== allNames.length) {
@@ -324,7 +344,7 @@ function isValidISQSet(result: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }): boo
   
   // Check each key has at least 2 options
   for (const key of result.keys) {
-    if (!key.name || !key.options || key.options.length < 2) {
+    if (!key.name || typeof key.name !== 'string' || !Array.isArray(key.options) || key.options.length < 2) {
       return false;
     }
   }
@@ -332,7 +352,7 @@ function isValidISQSet(result: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }): boo
   return true;
 }
 
-async function extractFromURLsDirectly(urls: string[]): Promise<{ config: ISQ; keys: ISQ[]; buyers: ISQ[] } | null> {
+async function extractFromURLsDirectly(urls: string[]): Promise<{ config: ISQ; keys: ISQ[] } | null> {
   console.warn("Stage2: Using direct text-based extraction");
   
   const urlContents = await Promise.all(urls.map(fetchURL));
@@ -441,7 +461,7 @@ async function extractFromURLsDirectly(urls: string[]): Promise<{ config: ISQ; k
   }
   
   if (config.name && config.options.length >= 2 && keys.length >= 3) {
-    return { config, keys, buyers: [] };
+    return { config, keys };
   }
   
   return null;
@@ -458,61 +478,48 @@ function buildISQExtractionPromptFirst(
     `URL ${i+1}: ${url}\nContent Preview: "${contents[i].substring(0, 800)}..."`
   ).join('\n\n---\n\n');
 
-  return `CRITICAL TASK: Extract ISQs for Indian B2B marketplace. Follow EXACT rules.
+  return `EXTRACT SPECIFICATIONS FOR INDIAN B2B MARKETPLACE
 
 MCAT CATEGORIES: ${input.mcats.map(m => m.mcat_name).join(', ')}
 
-CONTENT FROM ${urls.length} URLs:
+URL CONTENT:
 ${urlSummaries}
 
-========== RULES (FOLLOW IN ORDER) ==========
+========== RULES ==========
 
-1. SPEC IDENTIFICATION:
-   - Read ALL URL content CAREFULLY.
-   - List EVERY specification mentioned (Material, Size, Thickness, Grade, etc.).
-   - IGNORE specs that are part of MCAT name (e.g., "Material" for "Stainless Steel Pipe").
+1. EXTRACT CONFIG ISQ (1 SPECIFICATION):
+   - Choose ONE specification that MOST affects PRICE
+   - Must appear in AT LEAST 2 different URLs
+   - Must have AT LEAST 2 options that appear in multiple URLs
+   - Examples: Material Grade, Thickness, Capacity
 
-2. FREQUENCY VALIDATION (RULE OF TWO):
-   - Keep ONLY specs appearing in ≥2 URLs.
-   - For each spec, keep ONLY options appearing in ≥2 URLs.
-   - Discard specs with <2 shared options.
+2. EXTRACT KEY ISQs (3 SPECIFICATIONS):
+   - Choose THREE most frequently mentioned specifications
+   - Must appear in AT LEAST 2 different URLs  
+   - Each must have AT LEAST 2 options
+   - Must be DIFFERENT from Config ISQ
+   - Examples: Size, Finish, Brand, Certification
 
-3. CONFIG ISQ SELECTION (EXACTLY 1):
-   - Choose spec that MOST impacts PRICE/CONFIGURATION.
-   - Must have ≥2 shared options.
-   - Examples: Material Grade, Capacity, Thickness.
-   - ONCE SELECTED, REMOVE from Key ISQ consideration.
+3. STRICT FORMATTING:
+   - NO Buyer ISQs (only Config + 3 Keys)
+   - NO duplicates
+   - Use common Indian B2B terms
+   - Copy options EXACTLY from URLs
 
-4. KEY ISQ SELECTION (EXACTLY 3):
-   - From remaining specs, pick 3 MOST FREQUENT.
-   - Must be DIFFERENT from Config ISQ.
-   - Each must have ≥2 shared options.
-   - Must be category-defining.
-
-5. DUPLICATE PREVENTION:
-   - NO spec name can appear twice.
-   - Normalize names: "Thk" = "Thickness", "Size" = "Dimensions".
-
-6. OUTPUT FORMAT:
-   - Use EXACT JSON below.
-   - Spec names: Use common Indian B2B terms.
-   - Options: Use EXACT values from URLs, deduplicated.
-
-========== REQUIRED JSON FORMAT ==========
+========== OUTPUT FORMAT ==========
 {
   "config": {
-    "name": "Specification Name",
-    "options": ["Option 1", "Option 2", "Option 3"]
+    "name": "Material Grade",
+    "options": ["304", "316", "304L"]
   },
   "keys": [
-    {"name": "Spec 1", "options": ["A", "B", "C"]},
-    {"name": "Spec 2", "options": ["D", "E", "F"]},
-    {"name": "Spec 3", "options": ["G", "H", "I"]}
+    {"name": "Thickness", "options": ["2mm", "3mm", "4mm"]},
+    {"name": "Size", "options": ["1/2 inch", "3/4 inch", "1 inch"]},
+    {"name": "Finish", "options": ["Polished", "Brushed", "Matte"]}
   ]
 }
 
-========== FINAL INSTRUCTION ==========
-Return ONLY the JSON object. No explanations. No markdown.`;
+Return ONLY the JSON. No explanations.`;
 }
 
 function buildISQExtractionPromptValidation(
@@ -524,58 +531,33 @@ function buildISQExtractionPromptValidation(
     `URL ${i+1}: ${url}\nFirst 600 chars: "${contents[i].substring(0, 600)}"`
   ).join('\n\n');
 
-  return `VALIDATION MODE: Previous extraction failed. Re-extract with strict validation.
+  return `VALIDATION MODE: Extract Config ISQ + 3 Key ISQs
 
 CATEGORIES: ${input.mcats.map(m => m.mcat_name).join(', ')}
 
-URL CONTENT:
+URLS TO ANALYZE:
 ${urlSummaries}
 
-========== VALIDATION STEPS ==========
+CRITICAL RULES:
+1. Config ISQ = Most price-sensitive spec (e.g., Grade, Thickness, Capacity)
+2. Key ISQs = Next 3 most important specs
+3. ALL specs must appear in ≥2 URLs
+4. ALL specs must have ≥2 options from URLs
+5. NO duplicates between Config and Keys
 
-STEP 1: EXTRACT ALL SPECS
-- Scan each URL for specification tables, bullet points, descriptions.
-- Note: Material, Dimensions, Grade, Thickness, Finish, etc.
-- Record SPEC NAME and ALL OPTIONS exactly as written.
+IMPORTANT: Do NOT include Buyer ISQs in this stage.
 
-STEP 2: CROSS-URL MATCHING
-- Create table: Spec Name | URL 1 Options | URL 2 Options | ...
-- Keep ONLY specs with entries in ≥2 URLs.
-- For each spec, keep ONLY options present in ≥2 URLs.
-
-STEP 3: PRICE IMPACT ANALYSIS
-- For each valid spec, determine price impact:
-  HIGH: Material Grade, Thickness, Capacity
-  MEDIUM: Finish, Brand, Certification
-  LOW: Color, Packaging
-- Select HIGHEST price impact spec as CONFIG ISQ.
-
-STEP 4: FREQUENCY RANKING
-- Count occurrences of each spec across URLs.
-- Rank by frequency (most frequent first).
-- After removing Config ISQ, pick top 3 as Key ISQs.
-
-STEP 5: QUALITY CHECKS
-- Each ISQ must have ≥2 options.
-- No duplicate spec names (check normalized forms).
-- Options must be exact matches, not similar.
-
-========== EXAMPLE OF VALID OUTPUT ==========
-For "Stainless Steel Pipes":
-- Config ISQ: "Grade" (impacts price significantly)
-- Key ISQs: "Thickness", "Size", "Finish" (frequently specified)
-
-========== OUTPUT FORMAT ==========
+FINAL OUTPUT MUST BE JSON:
 {
-  "config": {"name": "Grade", "options": ["304", "316", "304L"]},
+  "config": {"name": "SpecName", "options": ["opt1", "opt2"]},
   "keys": [
-    {"name": "Thickness", "options": ["2mm", "3mm", "4mm"]},
-    {"name": "Size", "options": ["1/2 inch", "3/4 inch", "1 inch"]},
-    {"name": "Finish", "options": ["Polished", "Brushed", "Matte"]}
+    {"name": "Spec1", "options": ["a", "b"]},
+    {"name": "Spec2", "options": ["c", "d"]},
+    {"name": "Spec3", "options": ["e", "f"]}
   ]
 }
 
-Return PURE JSON only. Begin with {.`;
+JSON only. No other text.`;
 }
 
 function buildISQExtractionPromptFallback(
@@ -584,24 +566,19 @@ function buildISQExtractionPromptFallback(
   contents: string[]
 ): string {
   const simpleSummary = urls.map((url, i) => 
-    `URL ${i+1}: Key specs found: [Extract 3-5 main specs from content]`
-  ).join('\n');
+    `URL ${i+1}: First 400 chars: "${contents[i].substring(0, 400)}..."`
+  ).join('\n\n');
 
-  return `FALLBACK MODE: Simple extraction for ${input.mcats.map(m => m.mcat_name).join(', ')}
+  return `SIMPLE EXTRACTION: Find specifications in URLs.
 
-ANALYZE THIS CONTENT:
+ANALYZE:
 ${simpleSummary}
 
-EXTRACT:
-1. One MAIN specification that affects price most (Config ISQ)
-2. Three OTHER important specifications (Key ISQs)
+FIND:
+1. One MAIN specification (affects price most)
+2. Three OTHER important specifications
 
-RULES:
-- Each must have at least 2 different options
-- No duplicates
-- Use simple common names
-
-JSON OUTPUT:
+FORMAT:
 {
   "config": {"name": "MainSpec", "options": ["opt1", "opt2"]},
   "keys": [
@@ -622,11 +599,11 @@ function generateFallbackStage2(): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
       { name: "Size", options: ["1/2 inch", "3/4 inch", "1 inch"] },
       { name: "Finish", options: ["Polished", "Brushed", "Matte"] }
     ],
-    buyers: []
+    buyers: [] // Empty array for Stage 2
   };
 }
 
-// ========== STAGE 3 ENHANCED WITH PROPER BUYER ISQ SELECTION ==========
+// ========== STAGE 3 - BUYER ISQ SELECTION ONLY ==========
 
 export function selectStage3BuyerISQs(
   stage1: Stage1Output,
@@ -640,53 +617,61 @@ export function selectStage3BuyerISQs(
   stage1.seller_specs.forEach(ss => {
     ss.mcats.forEach(mcat => {
       // Primary specs
-      mcat.finalized_specs.finalized_primary_specs.specs.forEach(s =>
+      mcat.finalized_specs.finalized_primary_specs.specs.forEach(s => {
+        // Fix: Ensure spec_name is a string
+        const specName = String(s.spec_name || "");
         stage1All.push({ 
-          name: s.spec_name, 
-          options: s.options, 
+          name: specName, 
+          options: Array.isArray(s.options) ? s.options.map(String) : [], 
           tier: 'Primary', 
-          normName: normalizeSpecName(s.spec_name) 
-        })
-      );
+          normName: normalizeSpecName(specName)
+        });
+      });
       
       // Secondary specs
-      mcat.finalized_specs.finalized_secondary_specs.specs.forEach(s =>
+      mcat.finalized_specs.finalized_secondary_specs.specs.forEach(s => {
+        const specName = String(s.spec_name || "");
         stage1All.push({ 
-          name: s.spec_name, 
-          options: s.options, 
+          name: specName, 
+          options: Array.isArray(s.options) ? s.options.map(String) : [], 
           tier: 'Secondary', 
-          normName: normalizeSpecName(s.spec_name) 
-        })
-      );
+          normName: normalizeSpecName(specName)
+        });
+      });
       
       // Tertiary specs (for completeness)
-      mcat.finalized_specs.finalized_tertiary_specs.specs.forEach(s =>
+      mcat.finalized_specs.finalized_tertiary_specs.specs.forEach(s => {
+        const specName = String(s.spec_name || "");
         stage1All.push({ 
-          name: s.spec_name, 
-          options: s.options, 
+          name: specName, 
+          options: Array.isArray(s.options) ? s.options.map(String) : [], 
           tier: 'Tertiary', 
-          normName: normalizeSpecName(s.spec_name) 
-        })
-      );
+          normName: normalizeSpecName(specName)
+        });
+      });
     });
   });
   
-  // 2. Extract all specs from Stage 2
+  // 2. Extract all specs from Stage 2 (Config + Keys)
   const stage2All: (ISQ & { normName: string })[] = [
     stage2.config,
-    ...stage2.keys,
-    ...(stage2.buyers || [])
+    ...stage2.keys
   ].map(s => ({ 
-    ...s, 
-    normName: normalizeSpecName(s.name) 
+    name: String(s.name || ""),
+    options: Array.isArray(s.options) ? s.options.map(String) : [],
+    normName: normalizeSpecName(String(s.name || ""))
   }));
   
   // 3. Find common specifications (intersection)
-  const commonSpecs: (ISQ & { tier: 'Primary' | 'Secondary' | 'Tertiary'; stage1Options: string[]; stage2Options: string[] })[] = [];
+  const commonSpecs: (ISQ & { 
+    tier: 'Primary' | 'Secondary' | 'Tertiary'; 
+    stage1Options: string[]; 
+    stage2Options: string[] 
+  })[] = [];
   
   stage1All.forEach(s1 => {
     const s2Match = stage2All.find(s2 => s2.normName === s1.normName);
-    if (s2Match) {
+    if (s2Match && s1.normName) {
       commonSpecs.push({
         name: s1.name,
         options: [], // Will be filled based on priority
@@ -705,53 +690,60 @@ export function selectStage3BuyerISQs(
   
   // Priority 1: Primary tier common specs that are also in Stage 2
   const primaryCommonSpecs = commonSpecs.filter(s => s.tier === 'Primary');
+  
+  // Priority 2: Secondary tier common specs
+  const secondaryCommonSpecs = commonSpecs.filter(s => s.tier === 'Secondary');
+  
+  // Priority 3: Any common specs
+  const otherCommonSpecs = commonSpecs.filter(s => s.tier === 'Tertiary');
+  
+  // Selection logic
+  let selectedSpecs = [];
+  
+  // Try to get 2 Primary specs
   if (primaryCommonSpecs.length >= 2) {
-    buyerISQs.push(...selectTopSpecsWithOptions(primaryCommonSpecs.slice(0, 2)));
+    selectedSpecs = primaryCommonSpecs.slice(0, 2);
   } 
-  // Priority 2: Mix of Primary and Secondary if not enough Primary
-  else if (primaryCommonSpecs.length === 1) {
-    buyerISQs.push(...selectTopSpecsWithOptions([primaryCommonSpecs[0]]));
-    const secondaryCommonSpecs = commonSpecs.filter(s => s.tier === 'Secondary');
-    if (secondaryCommonSpecs.length > 0) {
-      const nextBest = secondaryCommonSpecs[0];
-      if (!buyerISQs.some(b => normalizeSpecName(b.name) === nextBest.normName)) {
-        buyerISQs.push(createBuyerISQ(nextBest));
-      }
+  // Try 1 Primary + 1 Secondary
+  else if (primaryCommonSpecs.length === 1 && secondaryCommonSpecs.length >= 1) {
+    selectedSpecs = [primaryCommonSpecs[0], secondaryCommonSpecs[0]];
+  }
+  // Try 2 Secondary
+  else if (secondaryCommonSpecs.length >= 2) {
+    selectedSpecs = secondaryCommonSpecs.slice(0, 2);
+  }
+  // Try 1 Secondary + 1 other
+  else if (secondaryCommonSpecs.length === 1 && otherCommonSpecs.length >= 1) {
+    selectedSpecs = [secondaryCommonSpecs[0], otherCommonSpecs[0]];
+  }
+  // Try any 2 specs
+  else if (commonSpecs.length >= 2) {
+    selectedSpecs = commonSpecs.slice(0, 2);
+  }
+  
+  // Create Buyer ISQs from selected specs
+  selectedSpecs.forEach(spec => {
+    buyerISQs.push(createBuyerISQ(spec));
+  });
+  
+  // If still don't have 2, create fallback
+  if (buyerISQs.length < 2) {
+    const fallbackSpecs = [
+      { name: "Material Grade", stage1Options: ["304", "316"], stage2Options: ["304", "316"] },
+      { name: "Thickness", stage1Options: ["2mm", "3mm"], stage2Options: ["2mm", "3mm"] }
+    ];
+    
+    while (buyerISQs.length < 2) {
+      const spec = fallbackSpecs[buyerISQs.length];
+      buyerISQs.push({
+        name: spec.name,
+        options: Array.from(new Set([...spec.stage1Options, ...spec.stage2Options])).slice(0, 8)
+      });
     }
   }
-  // Priority 3: Secondary tier only
-  else {
-    const secondaryCommonSpecs = commonSpecs.filter(s => s.tier === 'Secondary');
-    if (secondaryCommonSpecs.length >= 2) {
-      buyerISQs.push(...selectTopSpecsWithOptions(secondaryCommonSpecs.slice(0, 2)));
-    }
-  }
   
-  // If still don't have 2, use any common specs
-  if (buyerISQs.length < 2 && commonSpecs.length > buyerISQs.length) {
-    const remaining = commonSpecs.filter(s => 
-      !buyerISQs.some(b => normalizeSpecName(b.name) === s.normName)
-    );
-    buyerISQs.push(...selectTopSpecsWithOptions(remaining.slice(0, 2 - buyerISQs.length)));
-  }
-  
-  // Final validation
-  if (buyerISQs.length === 0 && commonSpecs.length > 0) {
-    buyerISQs.push(...selectTopSpecsWithOptions(commonSpecs.slice(0, 2)));
-  }
-  
-  console.log(`Selected ${buyerISQs.length} Buyer ISQs`);
+  console.log(`Selected ${buyerISQs.length} Buyer ISQs for Stage 3`);
   return buyerISQs;
-}
-
-function selectTopSpecsWithOptions(specs: Array<{
-  name: string;
-  tier: string;
-  normName: string;
-  stage1Options: string[];
-  stage2Options: string[];
-}>): ISQ[] {
-  return specs.map(spec => createBuyerISQ(spec));
 }
 
 function createBuyerISQ(spec: {
@@ -760,9 +752,9 @@ function createBuyerISQ(spec: {
   stage2Options: string[];
 }): ISQ {
   // Priority order for options:
-  // 1. Options present in BOTH Stage 1 and Stage 2
+  // 1. Options present in BOTH Stage 1 and Stage 2 (highest priority)
   // 2. Options present ONLY in Stage 2
-  // 3. Options present ONLY in Stage 1
+  // 3. Options present ONLY in Stage 1 (lowest priority)
   
   const commonOptions = spec.stage2Options.filter(opt => 
     spec.stage1Options.includes(opt)
@@ -787,64 +779,34 @@ function createBuyerISQ(spec: {
   
   return {
     name: spec.name,
-    options: uniqueOptions.length > 0 ? uniqueOptions : ['Option 1', 'Option 2']
+    options: uniqueOptions.length > 0 ? uniqueOptions : ['Standard Option 1', 'Standard Option 2']
   };
 }
 
-// ========== STAGE 3 GEMINI PROMPT FOR BUYER ISQs ==========
+// ========== GEMINI PROMPT FOR STAGE 3 BUYER ISQs ==========
 
-export async function generateStage3BuyerISQs(
+export async function generateStage3BuyerISQsWithGemini(
   stage1Data: Stage1Output,
-  stage2ISQs: { config: ISQ; keys: ISQ[]; buyers?: ISQ[] },
-  commonSpecs: string[] // Array of common spec names
+  stage2ISQs: { config: ISQ; keys: ISQ[] },
+  commonSpecNames: string[]
 ): Promise<ISQ[]> {
   if (!STAGE3_API_KEY) {
     console.log("Stage 3 API key not configured, using local selection");
     return selectStage3BuyerISQs(stage1Data, stage2ISQs);
   }
 
-  // Build the data for the prompt
-  const stage1SpecsWithTiers: Array<{
-    name: string;
-    tier: 'Primary' | 'Secondary' | 'Tertiary';
-    options: string[];
-  }> = [];
-  
-  stage1Data.seller_specs.forEach(ss => {
-    ss.mcats.forEach(mcat => {
-      // Primary
-      mcat.finalized_specs.finalized_primary_specs.specs.forEach(s => {
-        stage1SpecsWithTiers.push({
-          name: s.spec_name,
-          tier: 'Primary',
-          options: s.options
-        });
-      });
-      
-      // Secondary
-      mcat.finalized_specs.finalized_secondary_specs.specs.forEach(s => {
-        stage1SpecsWithTiers.push({
-          name: s.spec_name,
-          tier: 'Secondary',
-          options: s.options
-        });
-      });
-    });
-  });
-  
-  const stage2Specs: ISQ[] = [
-    stage2ISQs.config,
-    ...stage2ISQs.keys
-  ];
-  
-  const prompt = buildStage3PromptForGemini(
-    stage1SpecsWithTiers,
-    stage2Specs,
-    commonSpecs
-  );
-  
   try {
     console.log("Calling Gemini for Stage 3 Buyer ISQ selection...");
+    
+    // Prepare data for prompt
+    const stage1Specs = extractStage1SpecsForPrompt(stage1Data);
+    const stage2Specs = extractStage2SpecsForPrompt(stage2ISQs);
+    
+    const prompt = buildStage3BuyerPrompt(
+      stage1Specs,
+      stage2Specs,
+      commonSpecNames
+    );
     
     const response = await fetchWithRetry(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${STAGE3_API_KEY}`,
@@ -854,7 +816,7 @@ export async function generateStage3BuyerISQs(
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.3,
+            temperature: 0.2, // Low temperature for consistent output
             maxOutputTokens: 2048,
             responseMimeType: "application/json"
           }
@@ -866,20 +828,25 @@ export async function generateStage3BuyerISQs(
     const parsed = extractJSONFromGemini(data);
     
     if (parsed && parsed.buyer_isqs && Array.isArray(parsed.buyer_isqs)) {
+      // Validate and format the response
       const validISQs = parsed.buyer_isqs
-        .filter((isq: any) => isq.name && isq.options && Array.isArray(isq.options))
+        .filter((isq: any) => isq && isq.name && typeof isq.name === 'string')
         .slice(0, 2)
         .map((isq: any) => ({
-          name: isq.name,
-          options: isq.options.slice(0, 8)
+          name: String(isq.name),
+          options: Array.isArray(isq.options) ? 
+                   isq.options.map(String).slice(0, 8) : 
+                   ['Option 1', 'Option 2']
         }));
       
       if (validISQs.length === 2) {
+        console.log("Gemini successfully generated Buyer ISQs for Stage 3");
         return validISQs;
       }
     }
     
-    // Fallback to local selection if Gemini fails
+    // Fallback to local selection
+    console.log("Gemini failed, using local Buyer ISQ selection");
     return selectStage3BuyerISQs(stage1Data, stage2ISQs);
     
   } catch (error) {
@@ -888,12 +855,54 @@ export async function generateStage3BuyerISQs(
   }
 }
 
-function buildStage3PromptForGemini(
+function extractStage1SpecsForPrompt(stage1Data: Stage1Output): Array<{
+  name: string;
+  tier: string;
+  options: string[];
+}> {
+  const specs: Array<{ name: string; tier: string; options: string[] }> = [];
+  
+  stage1Data.seller_specs.forEach(ss => {
+    ss.mcats.forEach(mcat => {
+      // Primary specs
+      mcat.finalized_specs.finalized_primary_specs.specs.forEach(s => {
+        specs.push({
+          name: String(s.spec_name || ""),
+          tier: "Primary",
+          options: Array.isArray(s.options) ? s.options.map(String) : []
+        });
+      });
+      
+      // Secondary specs
+      mcat.finalized_specs.finalized_secondary_specs.specs.forEach(s => {
+        specs.push({
+          name: String(s.spec_name || ""),
+          tier: "Secondary",
+          options: Array.isArray(s.options) ? s.options.map(String) : []
+        });
+      });
+    });
+  });
+  
+  return specs;
+}
+
+function extractStage2SpecsForPrompt(stage2ISQs: { config: ISQ; keys: ISQ[] }): ISQ[] {
+  return [
+    stage2ISQs.config,
+    ...stage2ISQs.keys
+  ].map(spec => ({
+    name: String(spec.name || ""),
+    options: Array.isArray(spec.options) ? spec.options.map(String) : []
+  }));
+}
+
+function buildStage3BuyerPrompt(
   stage1Specs: Array<{ name: string; tier: string; options: string[] }>,
   stage2Specs: ISQ[],
-  commonSpecs: string[]
+  commonSpecNames: string[]
 ): string {
-  // Group Stage 1 specs by name with their highest tier
+  // Group Stage 1 specs by name (keeping highest tier)
   const stage1Map = new Map<string, { tier: string; options: string[] }>();
   stage1Specs.forEach(spec => {
     const existing = stage1Map.get(spec.name);
@@ -911,74 +920,135 @@ function buildStage3PromptForGemini(
     }
   });
   
-  // Create common specs list with data from both stages
-  const commonSpecsDetailed = commonSpecs.map(specName => {
-    const stage1Data = stage1Map.get(specName);
-    const normName = normalizeSpecName(specName);
-    const stage2Data = stage2Map.get(normName);
-    
-    return {
-      name: specName,
-      tier: stage1Data?.tier || 'Unknown',
-      stage1Options: stage1Data?.options || [],
-      stage2Options: stage2Data || []
-    };
-  });
+  // Create detailed common specs list
+  const commonSpecsDetailed = commonSpecNames
+    .filter(name => name && typeof name === 'string')
+    .map(specName => {
+      const stage1Data = stage1Map.get(specName);
+      const normName = normalizeSpecName(specName);
+      const stage2Data = stage2Map.get(normName);
+      
+      return {
+        name: specName,
+        tier: stage1Data?.tier || 'Unknown',
+        stage1Options: stage1Data?.options || [],
+        stage2Options: stage2Data || []
+      };
+    })
+    .filter(spec => spec.stage1Options.length > 0 || spec.stage2Options.length > 0);
   
   const commonSpecsText = commonSpecsDetailed
-    .map(spec => `- ${spec.name} (${spec.tier}):
+    .map(spec => `- ${spec.name} (${spec.tier})
   Stage 1 Options: ${spec.stage1Options.slice(0, 5).join(', ')}${spec.stage1Options.length > 5 ? '...' : ''}
   Stage 2 Options: ${spec.stage2Options.slice(0, 5).join(', ')}${spec.stage2Options.length > 5 ? '...' : ''}`)
     .join('\n\n');
   
-  return `SELECT BUYER ISQs FOR INDIAN B2B MARKETPLACE
+  return `SELECT 2 BUYER ISQs FOR INDIAN B2B MARKETPLACE - STAGE 3 ONLY
 
 COMMON SPECIFICATIONS (Present in both Stage 1 and Stage 2):
-${commonSpecsText}
+${commonSpecsText || "No common specifications found"}
 
-========== SELECTION RULES (STRICT) ==========
+========== SELECTION RULES ==========
 
 1. SELECT EXACTLY 2 SPECIFICATIONS from the Common Specifications list above.
 
-2. PRIORITY ORDER:
-   a) FIRST: Select Primary-tier specifications
-   b) SECOND: If not enough Primary, select Secondary-tier
-   c) THIRD: Only if necessary, select from others
+2. PRIORITY ORDER (VERY IMPORTANT):
+   - FIRST PRIORITY: Primary-tier specifications from Stage 1
+   - SECOND PRIORITY: Secondary-tier specifications from Stage 1  
+   - THIRD PRIORITY: Any other common specifications
 
-3. OPTION SELECTION RULES (for each selected spec):
+3. OPTION SELECTION (for each chosen spec):
    - MAXIMUM 8 options per specification
    - PRIORITY ORDER for options:
      1. Options present in BOTH Stage 1 AND Stage 2 (highest priority)
      2. Options present ONLY in Stage 2
      3. Options present ONLY in Stage 1 (lowest priority)
-   - If fewer than 8 options total, include all available
-   - NO invented options - use only from provided lists
+   - Do NOT invent new options
+   - If fewer than 8 options exist, include all available
 
-4. OUTPUT FORMAT:
+4. OUTPUT REQUIREMENTS:
    - Return EXACTLY 2 specifications
    - Each with MAX 8 options
-   - Use EXACT JSON format below
+   - Use the EXACT JSON format below
 
-========== EXAMPLE OUTPUT ==========
+========== OUTPUT FORMAT ==========
 {
   "buyer_isqs": [
     {
-      "name": "Material Grade",
-      "options": ["304", "316", "304L", "316L"]
+      "name": "Specification Name 1",
+      "options": ["option1", "option2", "option3"]
     },
     {
-      "name": "Thickness",
-      "options": ["2mm", "3mm", "4mm", "5mm", "6mm"]
+      "name": "Specification Name 2", 
+      "options": ["optionA", "optionB", "optionC"]
     }
   ]
 }
 
-========== YOUR TASK ==========
-Analyze the Common Specifications above.
-Select the BEST 2 specifications following Priority Order.
-For each, compile options following Option Selection Rules.
+========== REMEMBER ==========
+- This is for STAGE 3 ONLY (Buyer ISQ selection)
+- Do NOT include Config ISQ or Key ISQs from Stage 2
+- Select only from Common Specifications list
+- Follow priority order strictly
 
-Return ONLY the JSON. No explanations.`;
+Return ONLY the JSON object. No explanations.`;
+}
+
+// ========== COMPARISON FUNCTION (for Stage 3 spec names) ==========
+
+export function compareResults(
+  chatgptSpecs: Stage1Output,
+  geminiSpecs: Stage1Output
+): { common_specs: string[]; chatgpt_unique_specs: string[]; gemini_unique_specs: string[] } {
+  
+  const extractAllNames = (specs: Stage1Output): string[] => {
+    const names: string[] = [];
+    specs.seller_specs.forEach(ss => {
+      ss.mcats.forEach(mcat => {
+        // Primary
+        mcat.finalized_specs.finalized_primary_specs.specs.forEach(s => {
+          const name = String(s.spec_name || "");
+          if (name) names.push(name);
+        });
+        // Secondary
+        mcat.finalized_specs.finalized_secondary_specs.specs.forEach(s => {
+          const name = String(s.spec_name || "");
+          if (name) names.push(name);
+        });
+        // Tertiary
+        mcat.finalized_specs.finalized_tertiary_specs.specs.forEach(s => {
+          const name = String(s.spec_name || "");
+          if (name) names.push(name);
+        });
+      });
+    });
+    return names;
+  };
+  
+  const chatgptNames = extractAllNames(chatgptSpecs);
+  const geminiNames = extractAllNames(geminiSpecs);
+  
+  // Normalize names for comparison
+  const normalizedChatgpt = chatgptNames.map(name => normalizeSpecName(name));
+  const normalizedGemini = geminiNames.map(name => normalizeSpecName(name));
+  
+  const common = chatgptNames.filter((name, index) => 
+    normalizedGemini.includes(normalizedChatgpt[index])
+  );
+  
+  const chatgptUnique = chatgptNames.filter((name, index) => 
+    !normalizedGemini.includes(normalizedChatgpt[index])
+  );
+  
+  const geminiUnique = geminiNames.filter((name, index) => 
+    !normalizedChatgpt.includes(normalizedGemini[index])
+  );
+  
+  return {
+    common_specs: [...new Set(common)],
+    chatgpt_unique_specs: [...new Set(chatgptUnique)],
+    gemini_unique_specs: [...new Set(geminiUnique)]
+  };
 }
 
 // ========== UTILITY FUNCTIONS ==========
@@ -1166,67 +1236,4 @@ REQUIRED JSON SCHEMA (match keys + nesting exactly)
  }
  ]
 }`;
-}
-
-export function compareResults(
-  chatgptSpecs: Stage1Output,
-  geminiSpecs: Stage1Output
-): { common_specs: string[]; chatgpt_unique_specs: string[]; gemini_unique_specs: string[] } {
-  
-  const extractAllNames = (specs: Stage1Output): string[] => {
-    const names: string[] = [];
-    specs.seller_specs.forEach(ss => {
-      ss.mcats.forEach(mcat => {
-        // Primary
-        mcat.finalized_specs.finalized_primary_specs.specs.forEach(s => 
-          names.push(s.spec_name));
-        // Secondary
-        mcat.finalized_specs.finalized_secondary_specs.specs.forEach(s => 
-          names.push(s.spec_name));
-        // Tertiary
-        mcat.finalized_specs.finalized_tertiary_specs.specs.forEach(s => 
-          names.push(s.spec_name));
-      });
-    });
-    return names;
-  };
-  
-  const chatgptNames = extractAllNames(chatgptSpecs);
-  const geminiNames = extractAllNames(geminiSpecs);
-  
-  // Normalize names for comparison
-  const normalizedChatgpt = chatgptNames.map(normalizeSpecName);
-  const normalizedGemini = geminiNames.map(normalizeSpecName);
-  
-  const common = chatgptNames.filter((name, index) => 
-    normalizedGemini.includes(normalizedChatgpt[index])
-  );
-  
-  const chatgptUnique = chatgptNames.filter((name, index) => 
-    !normalizedGemini.includes(normalizedChatgpt[index])
-  );
-  
-  const geminiUnique = geminiNames.filter((name, index) => 
-    !normalizedChatgpt.includes(normalizedGemini[index])
-  );
-  
-  return {
-    common_specs: [...new Set(common)],
-    chatgpt_unique_specs: [...new Set(chatgptUnique)],
-    gemini_unique_specs: [...new Set(geminiUnique)]
-  };
-}
-
-function extractAllSpecNames(specs: Stage1Output): string[] {
-  const names: string[] = [];
-  specs.seller_specs.forEach((ss) => {
-    ss.mcats.forEach((mcat) => {
-      const { finalized_primary_specs, finalized_secondary_specs, finalized_tertiary_specs } =
-        mcat.finalized_specs;
-      finalized_primary_specs.specs.forEach((s) => names.push(s.spec_name));
-      finalized_secondary_specs.specs.forEach((s) => names.push(s.spec_name));
-      finalized_tertiary_specs.specs.forEach((s) => names.push(s.spec_name));
-    });
-  });
-  return names;
 }
